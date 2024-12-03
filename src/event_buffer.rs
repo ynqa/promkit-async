@@ -10,6 +10,7 @@ pub enum EventBundle {
     KeyBuffer(Vec<char>),
     VerticalCursorBuffer(usize, usize),   // (up, down)
     HorizontalCursorBuffer(usize, usize), // (left, right)
+    Resize(u16, u16),                     // (width, height)
     Others(Event, usize),
 }
 
@@ -45,7 +46,7 @@ impl EventBuffer {
                     },
                     _ = delay => {
                         if !buffer.is_empty() {
-                            event_buffer_sender.send(Self::sequential_buffer(buffer.clone())).await?;
+                            event_buffer_sender.send(Self::process_events(buffer.clone())).await?;
                             buffer.clear();
                         }
                     },
@@ -55,127 +56,131 @@ impl EventBuffer {
         }
     }
 
-    fn sequential_buffer(events: Vec<Event>) -> Vec<EventBundle> {
-        let mut ret = Vec::new();
-        let mut charbuf = Vec::new();
-        let mut vertical_cursor = (0, 0); // (up, down)
-        let mut horizontal_cursor = (0, 0); // (left, right)
-        let mut others_buffer = Vec::new();
+    pub fn run_resize(
+        &self,
+        mut resize_receiver: Receiver<(u16, u16)>,
+        resize_sender: Sender<EventBundle>,
+    ) -> impl Future<Output = anyhow::Result<()>> + Send {
+        let delay_duration = self.delay_duration;
+
+        async move {
+            let mut last_event: Option<(u16, u16)> = None;
+            loop {
+                let delay = Delay::new(delay_duration);
+                futures::pin_mut!(delay);
+
+                tokio::select! {
+                    resize_opt = resize_receiver.recv() => {
+                        if let Some(event) = resize_opt {
+                            last_event = Some(event);
+                        } else {
+                            break;
+                        }
+                    },
+                    _ = delay => {
+                        if let Some((width, height)) = last_event.take() {
+                            resize_sender.send(EventBundle::Resize(width, height)).await?;
+                        }
+                    },
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn process_events(events: Vec<Event>) -> Vec<EventBundle> {
+        let mut result = Vec::new();
+        let mut current_chars = Vec::new();
+        let mut current_vertical = (0, 0);
+        let mut current_horizontal = (0, 0);
+        let mut current_others: Option<(Event, usize)> = None;
 
         for event in events {
             if let Some(ch) = Self::extract_char(&event) {
-                charbuf.push(ch);
-                // Check and insert if other aggregates are not edited
-                if vertical_cursor != (0, 0) {
-                    ret.push(EventBundle::VerticalCursorBuffer(
-                        vertical_cursor.0,
-                        vertical_cursor.1,
-                    ));
-                } else if horizontal_cursor != (0, 0) {
-                    ret.push(EventBundle::HorizontalCursorBuffer(
-                        horizontal_cursor.0,
-                        horizontal_cursor.1,
-                    ));
-                } else if !others_buffer.is_empty() {
-                    let times = others_buffer.len();
-                    ret.push(EventBundle::Others(others_buffer.pop().unwrap(), times));
-                }
-                // Initialize other aggregates
-                vertical_cursor = (0, 0);
-                horizontal_cursor = (0, 0);
-                others_buffer.clear();
-            } else if let Some(direction) = Self::detect_vertical_direction(&event) {
-                vertical_cursor.0 += direction.0;
-                vertical_cursor.1 += direction.1;
-                // Check and insert if other aggregates are not edited
-                if !charbuf.is_empty() {
-                    ret.push(EventBundle::KeyBuffer(charbuf.clone()));
-                } else if horizontal_cursor != (0, 0) {
-                    ret.push(EventBundle::HorizontalCursorBuffer(
-                        horizontal_cursor.0,
-                        horizontal_cursor.1,
-                    ));
-                } else if !others_buffer.is_empty() {
-                    let times = others_buffer.len();
-                    ret.push(EventBundle::Others(others_buffer.pop().unwrap(), times));
-                }
-                // Initialize other aggregates
-                charbuf.clear();
-                horizontal_cursor = (0, 0);
-                others_buffer.clear();
-            } else if let Some(direction) = Self::detect_horizontal_direction(&event) {
-                horizontal_cursor.0 += direction.0;
-                horizontal_cursor.1 += direction.1;
-                // Check and insert if other aggregates are not edited
-                if !charbuf.is_empty() {
-                    ret.push(EventBundle::KeyBuffer(charbuf.clone()));
-                } else if vertical_cursor != (0, 0) {
-                    ret.push(EventBundle::VerticalCursorBuffer(
-                        vertical_cursor.0,
-                        vertical_cursor.1,
-                    ));
-                } else if !others_buffer.is_empty() {
-                    let times = others_buffer.len();
-                    ret.push(EventBundle::Others(others_buffer.pop().unwrap(), times));
-                }
-                // Initialize other aggregates
-                charbuf.clear();
-                vertical_cursor = (0, 0);
-                others_buffer.clear();
+                Self::flush_non_char_buffers(
+                    &mut result,
+                    &mut current_vertical,
+                    &mut current_horizontal,
+                    &mut current_others,
+                );
+                current_chars.push(ch);
+            } else if let Some((up, down)) = Self::detect_vertical_direction(&event) {
+                Self::flush_char_buffer(&mut result, &mut current_chars);
+                Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
+                Self::flush_others_buffer(&mut result, &mut current_others);
+                current_vertical.0 += up;
+                current_vertical.1 += down;
+            } else if let Some((left, right)) = Self::detect_horizontal_direction(&event) {
+                Self::flush_char_buffer(&mut result, &mut current_chars);
+                Self::flush_vertical_buffer(&mut result, &mut current_vertical);
+                Self::flush_others_buffer(&mut result, &mut current_others);
+                current_horizontal.0 += left;
+                current_horizontal.1 += right;
             } else {
-                match others_buffer.last() {
-                    Some(last_event) => {
-                        if last_event == &event {
-                            others_buffer.push(event);
-                        } else {
-                            ret.push(EventBundle::Others(last_event.clone(), others_buffer.len()));
-                            others_buffer.clear();
-                            others_buffer.push(event);
-                        }
-                    }
-                    None => others_buffer.push(event),
-                }
+                Self::flush_char_buffer(&mut result, &mut current_chars);
+                Self::flush_vertical_buffer(&mut result, &mut current_vertical);
+                Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
 
-                // Check and insert if other aggregates are not edited
-                if !charbuf.is_empty() {
-                    ret.push(EventBundle::KeyBuffer(charbuf.clone()));
-                } else if vertical_cursor != (0, 0) {
-                    ret.push(EventBundle::VerticalCursorBuffer(
-                        vertical_cursor.0,
-                        vertical_cursor.1,
-                    ));
-                } else if horizontal_cursor != (0, 0) {
-                    ret.push(EventBundle::HorizontalCursorBuffer(
-                        horizontal_cursor.0,
-                        horizontal_cursor.1,
-                    ));
+                match &mut current_others {
+                    Some((last_event, count)) if last_event == &event => {
+                        *count += 1;
+                    }
+                    _ => {
+                        Self::flush_others_buffer(&mut result, &mut current_others);
+                        current_others = Some((event.clone(), 1));
+                    }
                 }
-                // Initialize other aggregates
-                charbuf.clear();
-                vertical_cursor = (0, 0);
-                horizontal_cursor = (0, 0);
             }
         }
 
-        // Handle the last event
-        if !charbuf.is_empty() {
-            ret.push(EventBundle::KeyBuffer(charbuf.clone()));
-        } else if vertical_cursor != (0, 0) {
-            ret.push(EventBundle::VerticalCursorBuffer(
-                vertical_cursor.0,
-                vertical_cursor.1,
-            ));
-        } else if horizontal_cursor != (0, 0) {
-            ret.push(EventBundle::HorizontalCursorBuffer(
-                horizontal_cursor.0,
-                horizontal_cursor.1,
-            ));
-        } else if !others_buffer.is_empty() {
-            let times = others_buffer.len();
-            ret.push(EventBundle::Others(others_buffer.pop().unwrap(), times));
-        }
+        // Flush remaining buffers
+        Self::flush_char_buffer(&mut result, &mut current_chars);
+        Self::flush_vertical_buffer(&mut result, &mut current_vertical);
+        Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
+        Self::flush_others_buffer(&mut result, &mut current_others);
 
-        ret
+        result
+    }
+
+    fn flush_char_buffer(result: &mut Vec<EventBundle>, chars: &mut Vec<char>) {
+        if !chars.is_empty() {
+            result.push(EventBundle::KeyBuffer(chars.clone()));
+            chars.clear();
+        }
+    }
+
+    fn flush_vertical_buffer(result: &mut Vec<EventBundle>, vertical: &mut (usize, usize)) {
+        if *vertical != (0, 0) {
+            result.push(EventBundle::VerticalCursorBuffer(vertical.0, vertical.1));
+            *vertical = (0, 0);
+        }
+    }
+
+    fn flush_horizontal_buffer(result: &mut Vec<EventBundle>, horizontal: &mut (usize, usize)) {
+        if *horizontal != (0, 0) {
+            result.push(EventBundle::HorizontalCursorBuffer(
+                horizontal.0,
+                horizontal.1,
+            ));
+            *horizontal = (0, 0);
+        }
+    }
+
+    fn flush_others_buffer(result: &mut Vec<EventBundle>, others: &mut Option<(Event, usize)>) {
+        if let Some((event, count)) = others.take() {
+            result.push(EventBundle::Others(event, count));
+        }
+    }
+
+    fn flush_non_char_buffers(
+        result: &mut Vec<EventBundle>,
+        vertical: &mut (usize, usize),
+        horizontal: &mut (usize, usize),
+        others: &mut Option<(Event, usize)>,
+    ) {
+        Self::flush_vertical_buffer(result, vertical);
+        Self::flush_horizontal_buffer(result, horizontal);
+        Self::flush_others_buffer(result, others);
     }
 
     fn extract_char(event: &Event) -> Option<char> {
@@ -228,7 +233,7 @@ impl EventBuffer {
 mod tests {
     use super::*;
 
-    mod sequential_buffer {
+    mod process_events {
         use super::*;
 
         #[test]
@@ -352,7 +357,7 @@ mod tests {
                 EventBundle::KeyBuffer(vec!['d']),
             ];
 
-            assert_eq!(EventBuffer::sequential_buffer(events), expected);
+            assert_eq!(EventBuffer::process_events(events), expected);
         }
 
         #[test]
@@ -374,7 +379,7 @@ mod tests {
                 1,
             )];
 
-            assert_eq!(EventBuffer::sequential_buffer(events), expected);
+            assert_eq!(EventBuffer::process_events(events), expected);
         }
     }
 }
