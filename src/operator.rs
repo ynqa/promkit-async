@@ -10,17 +10,17 @@ pub enum EventBundle {
     KeyBuffer(Vec<char>),
     VerticalCursorBuffer(usize, usize),   // (up, down)
     HorizontalCursorBuffer(usize, usize), // (left, right)
-    Resize(u16, u16),                     // (width, height)
+    DebouncedResize(u16, u16),            // (width, height)
     Others(Event, usize),
 }
 
-pub struct EventBuffer {
+pub struct TimeBasedOperator {
     delay_duration: Duration,
 }
 
-impl EventBuffer {
+impl TimeBasedOperator {
     pub fn new(delay_duration: Duration) -> Self {
-        EventBuffer { delay_duration }
+        TimeBasedOperator { delay_duration }
     }
 
     pub fn run(
@@ -29,6 +29,7 @@ impl EventBuffer {
         event_buffer_sender: Sender<Vec<EventBundle>>,
     ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let mut buffer = Vec::new();
+        let mut last_resize: Option<(u16, u16)> = None;
         let delay_duration = self.delay_duration;
 
         async move {
@@ -39,47 +40,26 @@ impl EventBuffer {
                 tokio::select! {
                     maybe_event = event_receiver.recv() => {
                         if let Some(event) = maybe_event {
-                            buffer.push(event);
+                            if let Event::Resize(width, height) = event {
+                                last_resize = Some((width, height));
+                            } else {
+                                buffer.push(event);
+                            }
                         } else {
                             break;
                         }
                     },
                     _ = delay => {
+                        let mut bundles = Vec::new();
                         if !buffer.is_empty() {
-                            event_buffer_sender.send(Self::process_events(buffer.clone())).await?;
+                            bundles.extend(Self::process_events(buffer.clone()));
                             buffer.clear();
                         }
-                    },
-                }
-            }
-            Ok(())
-        }
-    }
-
-    pub fn run_resize(
-        &self,
-        mut resize_receiver: Receiver<(u16, u16)>,
-        resize_sender: Sender<EventBundle>,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send {
-        let delay_duration = self.delay_duration;
-
-        async move {
-            let mut last_event: Option<(u16, u16)> = None;
-            loop {
-                let delay = Delay::new(delay_duration);
-                futures::pin_mut!(delay);
-
-                tokio::select! {
-                    resize_opt = resize_receiver.recv() => {
-                        if let Some(event) = resize_opt {
-                            last_event = Some(event);
-                        } else {
-                            break;
+                        if let Some((width, height)) = last_resize.take() {
+                            bundles.push(EventBundle::DebouncedResize(width, height));
                         }
-                    },
-                    _ = delay => {
-                        if let Some((width, height)) = last_event.take() {
-                            resize_sender.send(EventBundle::Resize(width, height)).await?;
+                        if !bundles.is_empty() {
+                            event_buffer_sender.send(bundles).await?;
                         }
                     },
                 }
@@ -96,38 +76,46 @@ impl EventBuffer {
         let mut current_others: Option<(Event, usize)> = None;
 
         for event in events {
-            if let Some(ch) = Self::extract_char(&event) {
-                Self::flush_non_char_buffers(
-                    &mut result,
-                    &mut current_vertical,
-                    &mut current_horizontal,
-                    &mut current_others,
-                );
-                current_chars.push(ch);
-            } else if let Some((up, down)) = Self::detect_vertical_direction(&event) {
-                Self::flush_char_buffer(&mut result, &mut current_chars);
-                Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
-                Self::flush_others_buffer(&mut result, &mut current_others);
-                current_vertical.0 += up;
-                current_vertical.1 += down;
-            } else if let Some((left, right)) = Self::detect_horizontal_direction(&event) {
-                Self::flush_char_buffer(&mut result, &mut current_chars);
-                Self::flush_vertical_buffer(&mut result, &mut current_vertical);
-                Self::flush_others_buffer(&mut result, &mut current_others);
-                current_horizontal.0 += left;
-                current_horizontal.1 += right;
-            } else {
-                Self::flush_char_buffer(&mut result, &mut current_chars);
-                Self::flush_vertical_buffer(&mut result, &mut current_vertical);
-                Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
+            match event {
+                event if Self::extract_char(&event).is_some() => {
+                    let ch = Self::extract_char(&event).unwrap();
+                    Self::flush_non_char_buffers(
+                        &mut result,
+                        &mut current_vertical,
+                        &mut current_horizontal,
+                        &mut current_others,
+                    );
+                    current_chars.push(ch);
+                }
+                event if Self::detect_vertical_direction(&event).is_some() => {
+                    let (up, down) = Self::detect_vertical_direction(&event).unwrap();
+                    Self::flush_char_buffer(&mut result, &mut current_chars);
+                    Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
+                    Self::flush_others_buffer(&mut result, &mut current_others);
+                    current_vertical.0 += up;
+                    current_vertical.1 += down;
+                }
+                event if Self::detect_horizontal_direction(&event).is_some() => {
+                    let (left, right) = Self::detect_horizontal_direction(&event).unwrap();
+                    Self::flush_char_buffer(&mut result, &mut current_chars);
+                    Self::flush_vertical_buffer(&mut result, &mut current_vertical);
+                    Self::flush_others_buffer(&mut result, &mut current_others);
+                    current_horizontal.0 += left;
+                    current_horizontal.1 += right;
+                }
+                _ => {
+                    Self::flush_char_buffer(&mut result, &mut current_chars);
+                    Self::flush_vertical_buffer(&mut result, &mut current_vertical);
+                    Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
 
-                match &mut current_others {
-                    Some((last_event, count)) if last_event == &event => {
-                        *count += 1;
-                    }
-                    _ => {
-                        Self::flush_others_buffer(&mut result, &mut current_others);
-                        current_others = Some((event.clone(), 1));
+                    match &mut current_others {
+                        Some((last_event, count)) if last_event == &event => {
+                            *count += 1;
+                        }
+                        _ => {
+                            Self::flush_others_buffer(&mut result, &mut current_others);
+                            current_others = Some((event.clone(), 1));
+                        }
                     }
                 }
             }
@@ -357,7 +345,7 @@ mod tests {
                 EventBundle::KeyBuffer(vec!['d']),
             ];
 
-            assert_eq!(EventBuffer::process_events(events), expected);
+            assert_eq!(TimeBasedOperator::process_events(events), expected);
         }
 
         #[test]
@@ -379,7 +367,7 @@ mod tests {
                 1,
             )];
 
-            assert_eq!(EventBuffer::process_events(events), expected);
+            assert_eq!(TimeBasedOperator::process_events(events), expected);
         }
     }
 }

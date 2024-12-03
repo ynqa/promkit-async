@@ -59,7 +59,6 @@ impl Lazy {
             .run(
                 Duration::from_millis(10),
                 Duration::from_millis(10),
-                Duration::from_millis(10),
                 fin_receiver,
                 indexed_pane_receiver,
                 loading_activation_receiver,

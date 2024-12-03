@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Receiver;
 use promkit::{
     crossterm::{
         cursor,
-        event::{Event, EventStream},
+        event::EventStream,
         execute,
         terminal::{disable_raw_mode, enable_raw_mode},
     },
@@ -22,10 +22,8 @@ use promkit::{
     terminal::Terminal,
 };
 
-pub mod event_buffer;
-use event_buffer::{EventBuffer, EventBundle};
-pub mod resize_debounce;
-use resize_debounce::ResizeDebounce;
+pub mod operator;
+use operator::{EventBundle, TimeBasedOperator};
 pub mod display_coordinator;
 use display_coordinator::DisplayCoordinator;
 
@@ -55,8 +53,7 @@ impl<T: PaneSyncer> Drop for Prompt<T> {
 impl<T: PaneSyncer> Prompt<T> {
     pub async fn run(
         &mut self,
-        event_buffer_delay_duration: Duration,
-        resize_debounce_delay_duration: Duration,
+        delay: Duration,
         coordinate_delay_duration: Duration,
         mut fin_receiver: Receiver<()>,
         indexed_pane_receiver: Receiver<(usize, usize, Pane)>,
@@ -65,22 +62,12 @@ impl<T: PaneSyncer> Prompt<T> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
 
-        let mut size = crossterm::terminal::size()?;
+        let size = crossterm::terminal::size()?;
 
-        let mut event_buffer = EventBuffer::new(event_buffer_delay_duration);
+        let mut operator = TimeBasedOperator::new(delay);
         let (event_sender, event_receiver) = tokio::sync::mpsc::channel(1);
         let (event_buffer_sender, mut event_buffer_receiver) = tokio::sync::mpsc::channel(1);
-        tokio::spawn(async move { event_buffer.run(event_receiver, event_buffer_sender).await });
-
-        let resize_debouncer = ResizeDebounce::new(resize_debounce_delay_duration);
-        let (resize_sender, resize_receiver) = tokio::sync::mpsc::channel(1);
-        let (debounced_resize_sender, mut debounced_resize_receiver) =
-            tokio::sync::mpsc::channel(1);
-        tokio::spawn(async move {
-            resize_debouncer
-                .run(resize_receiver, debounced_resize_sender)
-                .await
-        });
+        tokio::spawn(async move { operator.run(event_receiver, event_buffer_sender).await });
 
         let panes = self.renderer.init_panes(size.0, size.1);
 
@@ -102,19 +89,7 @@ impl<T: PaneSyncer> Prompt<T> {
             tokio::select! {
                 maybe_event = stream.next() => {
                     if let Some(Ok(event)) = maybe_event {
-                        match event {
-                            Event::Resize(width, height) => {
-                                let _ = resize_sender.send((width, height)).await;
-                            }
-                            other => {
-                                event_sender.send(other).await?;
-                            }
-                        }
-                    }
-                },
-                maybe_debounced_resize = debounced_resize_receiver.recv() => {
-                    if let Some((width, height)) = maybe_debounced_resize {
-                        size = (width, height);
+                        event_sender.send(event).await?;
                     }
                 },
                 maybe_event_buffer = event_buffer_receiver.recv() => {

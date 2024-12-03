@@ -5,7 +5,7 @@ use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
 use futures::Future;
 use tokio::sync::mpsc::Sender;
 
-use promkit_async::{event_buffer::EventBundle, PaneSyncer};
+use promkit_async::{operator::EventBundle, PaneSyncer};
 
 use crate::lazyutil::keymap;
 
@@ -84,7 +84,7 @@ impl PaneSyncer for Renderer {
 
             let edited = state.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 let mut lazy_state = lazy_state.lock().unwrap();
                 lazy_state.texteditor = edited.texteditor;
                 indexed_pane_sender.try_send((
