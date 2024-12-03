@@ -10,7 +10,7 @@ pub enum EventBundle {
     KeyBuffer(Vec<char>),
     VerticalCursorBuffer(usize, usize),   // (up, down)
     HorizontalCursorBuffer(usize, usize), // (left, right)
-    DebouncedResize(u16, u16),            // (width, height)
+    LastResize(u16, u16),                 // (width, height)
     Others(Event, usize),
 }
 
@@ -29,7 +29,6 @@ impl TimeBasedOperator {
         event_buffer_sender: Sender<Vec<EventBundle>>,
     ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let mut buffer = Vec::new();
-        let mut last_resize: Option<(u16, u16)> = None;
         let delay_duration = self.delay_duration;
 
         async move {
@@ -40,26 +39,18 @@ impl TimeBasedOperator {
                 tokio::select! {
                     maybe_event = event_receiver.recv() => {
                         if let Some(event) = maybe_event {
-                            if let Event::Resize(width, height) = event {
-                                last_resize = Some((width, height));
-                            } else {
-                                buffer.push(event);
-                            }
+                            buffer.push(event);
                         } else {
                             break;
                         }
                     },
                     _ = delay => {
-                        let mut bundles = Vec::new();
                         if !buffer.is_empty() {
-                            bundles.extend(Self::process_events(buffer.clone()));
+                            let bundles = Self::process_events(buffer.clone());
+                            if !bundles.is_empty() {
+                                event_buffer_sender.send(bundles).await?;
+                            }
                             buffer.clear();
-                        }
-                        if let Some((width, height)) = last_resize.take() {
-                            bundles.push(EventBundle::DebouncedResize(width, height));
-                        }
-                        if !bundles.is_empty() {
-                            event_buffer_sender.send(bundles).await?;
                         }
                     },
                 }
@@ -74,9 +65,22 @@ impl TimeBasedOperator {
         let mut current_vertical = (0, 0);
         let mut current_horizontal = (0, 0);
         let mut current_others: Option<(Event, usize)> = None;
+        let mut last_resize: Option<(u16, u16)> = None;
+        let mut resize_index: Option<usize> = None;
 
         for event in events {
             match event {
+                Event::Resize(width, height) => {
+                    Self::flush_all_buffers(
+                        &mut result,
+                        &mut current_chars,
+                        &mut current_vertical,
+                        &mut current_horizontal,
+                        &mut current_others,
+                    );
+                    last_resize = Some((width, height));
+                    resize_index = Some(result.len());
+                }
                 event if Self::extract_char(&event).is_some() => {
                     let ch = Self::extract_char(&event).unwrap();
                     Self::flush_non_char_buffers(
@@ -122,12 +126,33 @@ impl TimeBasedOperator {
         }
 
         // Flush remaining buffers
-        Self::flush_char_buffer(&mut result, &mut current_chars);
-        Self::flush_vertical_buffer(&mut result, &mut current_vertical);
-        Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
-        Self::flush_others_buffer(&mut result, &mut current_others);
+        Self::flush_all_buffers(
+            &mut result,
+            &mut current_chars,
+            &mut current_vertical,
+            &mut current_horizontal,
+            &mut current_others,
+        );
+
+        // Add the last resize event if exists at the recorded index
+        if let (Some((width, height)), Some(idx)) = (last_resize, resize_index) {
+            result.insert(idx, EventBundle::LastResize(width, height));
+        }
 
         result
+    }
+
+    fn flush_all_buffers(
+        result: &mut Vec<EventBundle>,
+        chars: &mut Vec<char>,
+        vertical: &mut (usize, usize),
+        horizontal: &mut (usize, usize),
+        others: &mut Option<(Event, usize)>,
+    ) {
+        Self::flush_char_buffer(result, chars);
+        Self::flush_vertical_buffer(result, vertical);
+        Self::flush_horizontal_buffer(result, horizontal);
+        Self::flush_others_buffer(result, others);
     }
 
     fn flush_char_buffer(result: &mut Vec<EventBundle>, chars: &mut Vec<char>) {
@@ -245,6 +270,7 @@ mod tests {
                     kind: KeyEventKind::Press,
                     state: KeyEventState::NONE,
                 }),
+                Event::Resize(128, 128),
                 Event::Key(KeyEvent {
                     code: KeyCode::Up,
                     modifiers: KeyModifiers::NONE,
@@ -311,6 +337,7 @@ mod tests {
                     kind: KeyEventKind::Press,
                     state: KeyEventState::NONE,
                 }),
+                Event::Resize(64, 64),
                 Event::Key(KeyEvent {
                     code: KeyCode::Char('d'),
                     modifiers: KeyModifiers::NONE,
@@ -342,6 +369,7 @@ mod tests {
                     1,
                 ),
                 EventBundle::VerticalCursorBuffer(1, 0),
+                EventBundle::LastResize(64, 64),
                 EventBundle::KeyBuffer(vec!['d']),
             ];
 
