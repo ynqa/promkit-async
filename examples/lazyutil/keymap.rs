@@ -5,25 +5,25 @@ use promkit::{
 
 use tokio::sync::mpsc::Sender;
 
-use promkit_async::operator::EventBundle;
+use promkit_async::operator::EventGroup;
 
-pub type Handler = fn(&[EventBundle], &mut text_editor::State, &Sender<()>) -> anyhow::Result<()>;
+pub type Handler = fn(&[EventGroup], &mut text_editor::State, &Sender<()>) -> anyhow::Result<()>;
 
 pub fn default(
-    event_buffer: &[EventBundle],
+    event_buffer: &[EventGroup],
     state: &mut text_editor::State,
     fin_sender: &Sender<()>,
 ) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
-            EventBundle::KeyBuffer(chars) => match state.edit_mode {
+            EventGroup::KeyBuffer(chars) => match state.edit_mode {
                 text_editor::Mode::Insert => state.texteditor.insert_chars(&chars),
                 text_editor::Mode::Overwrite => state.texteditor.overwrite_chars(&chars),
             },
-            EventBundle::HorizontalCursorBuffer(left, right) => {
+            EventGroup::HorizontalCursorBuffer(left, right) => {
                 state.texteditor.shift(*left, *right);
             }
-            EventBundle::Others(e, times) => match e {
+            EventGroup::Others(e, times) => match e {
                 Event::Key(KeyEvent {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,

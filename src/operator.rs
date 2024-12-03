@@ -6,7 +6,7 @@ use futures_timer::Delay;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum EventBundle {
+pub enum EventGroup {
     KeyBuffer(Vec<char>),
     VerticalCursorBuffer(usize, usize),   // (up, down)
     HorizontalCursorBuffer(usize, usize), // (left, right)
@@ -25,8 +25,8 @@ impl TimeBasedOperator {
 
     pub fn run(
         &mut self,
-        mut event_receiver: Receiver<Event>,
-        event_buffer_sender: Sender<Vec<EventBundle>>,
+        mut receiver: Receiver<Event>,
+        sender: Sender<Vec<EventGroup>>,
     ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let mut buffer = Vec::new();
         let delay_duration = self.delay_duration;
@@ -37,7 +37,7 @@ impl TimeBasedOperator {
                 futures::pin_mut!(delay);
 
                 tokio::select! {
-                    maybe_event = event_receiver.recv() => {
+                    maybe_event = receiver.recv() => {
                         if let Some(event) = maybe_event {
                             buffer.push(event);
                         } else {
@@ -48,7 +48,7 @@ impl TimeBasedOperator {
                         if !buffer.is_empty() {
                             let bundles = Self::process_events(buffer.clone());
                             if !bundles.is_empty() {
-                                event_buffer_sender.send(bundles).await?;
+                                sender.send(bundles).await?;
                             }
                             buffer.clear();
                         }
@@ -59,7 +59,7 @@ impl TimeBasedOperator {
         }
     }
 
-    fn process_events(events: Vec<Event>) -> Vec<EventBundle> {
+    fn process_events(events: Vec<Event>) -> Vec<EventGroup> {
         let mut result = Vec::new();
         let mut current_chars = Vec::new();
         let mut current_vertical = (0, 0);
@@ -136,14 +136,14 @@ impl TimeBasedOperator {
 
         // Add the last resize event if exists at the recorded index
         if let (Some((width, height)), Some(idx)) = (last_resize, resize_index) {
-            result.insert(idx, EventBundle::LastResize(width, height));
+            result.insert(idx, EventGroup::LastResize(width, height));
         }
 
         result
     }
 
     fn flush_all_buffers(
-        result: &mut Vec<EventBundle>,
+        result: &mut Vec<EventGroup>,
         chars: &mut Vec<char>,
         vertical: &mut (usize, usize),
         horizontal: &mut (usize, usize),
@@ -155,23 +155,23 @@ impl TimeBasedOperator {
         Self::flush_others_buffer(result, others);
     }
 
-    fn flush_char_buffer(result: &mut Vec<EventBundle>, chars: &mut Vec<char>) {
+    fn flush_char_buffer(result: &mut Vec<EventGroup>, chars: &mut Vec<char>) {
         if !chars.is_empty() {
-            result.push(EventBundle::KeyBuffer(chars.clone()));
+            result.push(EventGroup::KeyBuffer(chars.clone()));
             chars.clear();
         }
     }
 
-    fn flush_vertical_buffer(result: &mut Vec<EventBundle>, vertical: &mut (usize, usize)) {
+    fn flush_vertical_buffer(result: &mut Vec<EventGroup>, vertical: &mut (usize, usize)) {
         if *vertical != (0, 0) {
-            result.push(EventBundle::VerticalCursorBuffer(vertical.0, vertical.1));
+            result.push(EventGroup::VerticalCursorBuffer(vertical.0, vertical.1));
             *vertical = (0, 0);
         }
     }
 
-    fn flush_horizontal_buffer(result: &mut Vec<EventBundle>, horizontal: &mut (usize, usize)) {
+    fn flush_horizontal_buffer(result: &mut Vec<EventGroup>, horizontal: &mut (usize, usize)) {
         if *horizontal != (0, 0) {
-            result.push(EventBundle::HorizontalCursorBuffer(
+            result.push(EventGroup::HorizontalCursorBuffer(
                 horizontal.0,
                 horizontal.1,
             ));
@@ -179,14 +179,14 @@ impl TimeBasedOperator {
         }
     }
 
-    fn flush_others_buffer(result: &mut Vec<EventBundle>, others: &mut Option<(Event, usize)>) {
+    fn flush_others_buffer(result: &mut Vec<EventGroup>, others: &mut Option<(Event, usize)>) {
         if let Some((event, count)) = others.take() {
-            result.push(EventBundle::Others(event, count));
+            result.push(EventGroup::Others(event, count));
         }
     }
 
     fn flush_non_char_buffers(
-        result: &mut Vec<EventBundle>,
+        result: &mut Vec<EventGroup>,
         vertical: &mut (usize, usize),
         horizontal: &mut (usize, usize),
         others: &mut Option<(Event, usize)>,
@@ -347,10 +347,10 @@ mod tests {
             ];
 
             let expected = vec![
-                EventBundle::KeyBuffer(vec!['a', 'B', 'c']),
-                EventBundle::VerticalCursorBuffer(2, 1),
-                EventBundle::HorizontalCursorBuffer(2, 1),
-                EventBundle::Others(
+                EventGroup::KeyBuffer(vec!['a', 'B', 'c']),
+                EventGroup::VerticalCursorBuffer(2, 1),
+                EventGroup::HorizontalCursorBuffer(2, 1),
+                EventGroup::Others(
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('f'),
                         modifiers: KeyModifiers::CONTROL,
@@ -359,7 +359,7 @@ mod tests {
                     }),
                     3,
                 ),
-                EventBundle::Others(
+                EventGroup::Others(
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('d'),
                         modifiers: KeyModifiers::CONTROL,
@@ -368,9 +368,9 @@ mod tests {
                     }),
                     1,
                 ),
-                EventBundle::VerticalCursorBuffer(1, 0),
-                EventBundle::LastResize(64, 64),
-                EventBundle::KeyBuffer(vec!['d']),
+                EventGroup::VerticalCursorBuffer(1, 0),
+                EventGroup::LastResize(64, 64),
+                EventGroup::KeyBuffer(vec!['d']),
             ];
 
             assert_eq!(TimeBasedOperator::process_events(events), expected);
@@ -385,7 +385,7 @@ mod tests {
                 state: KeyEventState::NONE,
             })];
 
-            let expected = vec![EventBundle::Others(
+            let expected = vec![EventGroup::Others(
                 Event::Key(KeyEvent {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,

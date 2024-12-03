@@ -23,7 +23,7 @@ use promkit::{
 };
 
 pub mod operator;
-use operator::{EventBundle, TimeBasedOperator};
+use operator::{EventGroup, TimeBasedOperator};
 pub mod display_coordinator;
 use display_coordinator::DisplayCoordinator;
 
@@ -32,7 +32,7 @@ pub trait PaneSyncer: promkit::Finalizer {
     fn sync(
         &mut self,
         version: usize,
-        event_buffer: &[EventBundle],
+        event_buffer: &[EventGroup],
         width: u16,
         height: u16,
     ) -> impl Future<Output = anyhow::Result<()>> + Send;

@@ -5,7 +5,7 @@ use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
 use futures::Future;
 use tokio::sync::mpsc::Sender;
 
-use promkit_async::{operator::EventBundle, PaneSyncer};
+use promkit_async::{operator::EventGroup, PaneSyncer};
 
 use crate::lazyutil::keymap;
 
@@ -64,7 +64,7 @@ impl PaneSyncer for Renderer {
     fn sync(
         &mut self,
         version: usize,
-        event_buffer: &[EventBundle],
+        event_buffer: &[EventGroup],
         width: u16,
         height: u16,
     ) -> impl Future<Output = anyhow::Result<()>> + Send {
