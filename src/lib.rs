@@ -36,11 +36,11 @@ pub trait PaneSyncer: promkit::Finalizer {
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
-pub struct Prompt<T: PaneSyncer> {
+pub struct Prompt<T> {
     pub renderer: T,
 }
 
-impl<T: PaneSyncer> Drop for Prompt<T> {
+impl<T> Drop for Prompt<T> {
     fn drop(&mut self) {
         execute!(io::stdout(), cursor::MoveToNextLine(1)).ok();
         execute!(io::stdout(), cursor::Show).ok();
