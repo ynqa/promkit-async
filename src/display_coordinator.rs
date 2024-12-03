@@ -6,17 +6,13 @@ use std::{
     time::Duration,
 };
 
-use crossterm::terminal;
 use futures::Future;
 use futures_timer::Delay;
-use tokio::sync::mpsc::Receiver;
-
 use promkit::{
-    grapheme::{matrixify, StyledGraphemes},
-    pane::Pane,
-    style::StyleBuilder,
+    crossterm::terminal, grapheme::StyledGraphemes, pane::Pane, style::StyleBuilder,
     terminal::Terminal,
 };
+use tokio::sync::mpsc::Receiver;
 
 pub struct DisplayCoordinator {
     shared_terminal: Arc<Mutex<Terminal>>,
@@ -112,15 +108,14 @@ impl DisplayCoordinator {
                                         let frame_index = frame_indexes[index].load(Ordering::SeqCst);
                                         let frame = &frames[frame_index % frames.len()];
                                         let (width, height) = terminal::size()?;
-                                        let (matrix, _) = matrixify(
-                                            width as usize,
-                                            height as usize,
-                                            0,
-                                            &StyledGraphemes::from_str(
+                                        let (matrix, _) = StyledGraphemes::from_str(
                                                 frame,
                                                 StyleBuilder::new().build(),
-                                            ),
-                                        );
+                                            ).matrixify(
+                                                width as usize,
+                                                height as usize,
+                                                0,
+                                            );
                                         let mut panes = shared_panes.lock().unwrap();
                                         panes[index] = Pane::new(matrix, 0);
                                         shared_terminal.lock().unwrap().draw(&panes)?;

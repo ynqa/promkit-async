@@ -8,9 +8,6 @@ use std::{
 };
 
 use futures::{stream::StreamExt, Future};
-
-use tokio::sync::mpsc::Receiver;
-
 use promkit::{
     crossterm::{
         cursor,
@@ -21,6 +18,7 @@ use promkit::{
     pane::Pane,
     terminal::Terminal,
 };
+use tokio::sync::mpsc::Receiver;
 
 pub mod operator;
 use operator::{EventGroup, TimeBasedOperator};

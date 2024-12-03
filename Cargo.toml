@@ -14,8 +14,9 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.81"
-crossterm = { version = "0.27.0", features = ["use-dev-tty", "event-stream"] }
+# See https://github.com/crossterm-rs/crossterm/issues/935
+crossterm = { version = "0.28.1", features = ["use-dev-tty", "event-stream", "libc"] }
 futures = "0.3.30"
 futures-timer = "3.0.3"
-promkit = "=0.4.0"
-tokio = { version = "1.36.0", features = ["full"] }
+promkit = "0.5.1"
+tokio = { version = "1.42.0", features = ["full"] }

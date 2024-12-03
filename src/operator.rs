@@ -1,8 +1,10 @@
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use futures::future::Future;
 use futures_timer::Delay;
+use promkit::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 #[derive(Clone, Debug, PartialEq)]

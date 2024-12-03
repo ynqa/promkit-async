@@ -42,7 +42,7 @@ impl Renderer {
 impl promkit::Finalizer for Renderer {
     type Return = String;
 
-    fn finalize(&self) -> anyhow::Result<Self::Return> {
+    fn finalize(&mut self) -> anyhow::Result<Self::Return> {
         Ok(self
             .state
             .lock()
