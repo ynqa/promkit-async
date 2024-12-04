@@ -3,10 +3,7 @@ use std::{io, pin::Pin, sync::Arc, time::Duration};
 use component::Component;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use futures::stream::Stream;
-use futures::{
-    stream::{SelectAll, StreamExt},
-    SinkExt,
-};
+use futures::StreamExt;
 use promkit::{
     crossterm::{
         cursor,
@@ -55,50 +52,47 @@ impl Prompt {
 
         let mut stream = EventStream::new();
 
-        let mut panes: Vec<Pane> = (0..self.components.len())
+        let mut panes: Vec<Pane> = self
+            .components
+            .iter()
             .map(|_| Pane::new(vec![StyledGraphemes::from("hi")], 0))
             .collect();
 
         let (event_senders, event_receivers): (
-            Vec<mpsc::Sender<&Vec<EventGroup>>>,
-            Vec<mpsc::Receiver<&Vec<EventGroup>>>,
-        ) = self
-            .components
-            .iter()
-            .map(|_| mpsc::channel::<&Vec<EventGroup>>(1))
-            .unzip();
+            Vec<mpsc::Sender<Vec<EventGroup>>>,
+            Vec<mpsc::Receiver<Vec<EventGroup>>>,
+        ) = self.components.iter().map(|_| mpsc::channel(1)).unzip();
 
         let (pane_senders, pane_receivers): (Vec<mpsc::Sender<Pane>>, Vec<mpsc::Receiver<Pane>>) =
-            self.components
-                .iter()
-                .map(|_| mpsc::channel::<Pane>(1))
-                .unzip();
+            self.components.iter().map(|_| mpsc::channel(1)).unzip();
 
-        for ((component, receiver), sender) in self
+        for ((component, event_rx), pane_tx) in self
             .components
             .iter()
             .zip(event_receivers)
             .zip(pane_senders)
         {
             let component = Arc::clone(component);
-            tokio::spawn(async move { component.subscribe(receiver) });
-            tokio::spawn(async move { component.publish(sender) });
+            tokio::spawn(async move {
+                tokio::join!(component.subscribe(event_rx), component.publish(pane_tx));
+            });
         }
 
-        type PaneStream = Pin<Box<dyn Stream<Item = (Pane, usize)> + Send>>;
-        let mut pane_stream = Box::pin(futures::stream::select_all(
+        let pane_stream = futures::stream::select_all(
             pane_receivers
-                .iter()
+                .into_iter()
                 .enumerate()
-                .map(|(index, receiver)| {
-                    let stream = Box::pin(futures::stream::unfold(receiver, |mut rx| async move {
-                        rx.recv().await.map(|pane| (pane, rx))
-                    }));
-                    let mapped_stream = stream.map(move |pane| (pane, index));
-                    Box::pin(mapped_stream) as PaneStream
+                .map(|(index, rx)| {
+                    Box::pin(
+                        futures::stream::unfold(rx, move |mut rx| async move {
+                            rx.recv().await.map(|pane| (pane, rx))
+                        })
+                        .map(move |pane| (pane, index)),
+                    ) as Pin<Box<dyn Stream<Item = (Pane, usize)> + Send>>
                 })
-                .collect::<Vec<PaneStream>>(),
-        ));
+                .collect::<Vec<_>>(),
+        );
+        tokio::pin!(pane_stream);
 
         loop {
             tokio::select! {
@@ -113,9 +107,9 @@ impl Prompt {
                     }
                     event_sender.send(event).await?;
                 },
-                Some(event_group) = event_group_receiver.recv() => {
-                    for idx in 0..self.components.len() {
-                        let _ = event_senders[idx].send(&event_group);
+                Some(event_groups) = event_group_receiver.recv() => {
+                    for sender in &event_senders {
+                        let _ = sender.send(event_groups.clone()).await;
                     }
                 },
                 Some((pane, index)) = pane_stream.next() => {
