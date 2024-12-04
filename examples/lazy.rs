@@ -38,11 +38,7 @@ impl Default for Lazy {
 
 impl Lazy {
     pub async fn run(self) -> anyhow::Result<()> {
-        let component = component::LazyComponent::new(
-            self.keymap,
-            self.text_editor_state.clone(),
-            self.text_editor_state.clone(),
-        )?;
+        let component = component::LazyComponent::new(self.keymap, self.text_editor_state.clone())?;
 
         Prompt {}
             .run(vec![Box::new(component)], Duration::from_millis(10))
