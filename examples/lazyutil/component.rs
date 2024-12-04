@@ -1,11 +1,9 @@
-use std::sync::{Arc, Mutex};
-
 use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor};
 
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use promkit_async::{
-    component::{Component, LoadingComponent},
+    component::{Component, LoadingComponent, StateHistory},
     operator::EventGroup,
 };
 
@@ -13,7 +11,7 @@ use crate::lazyutil::keymap;
 
 pub struct LazyComponent {
     keymap: ActiveKeySwitcher<keymap::Handler>,
-    state: Arc<Mutex<text_editor::State>>,
+    state: StateHistory<text_editor::State>,
 }
 
 impl LazyComponent {
@@ -23,7 +21,7 @@ impl LazyComponent {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             keymap,
-            state: Arc::new(Mutex::new(state)),
+            state: StateHistory::new(state),
         })
     }
 }
@@ -37,7 +35,11 @@ impl Component for LazyComponent {
 
 #[async_trait::async_trait]
 impl LoadingComponent for LazyComponent {
-    async fn process_event(&mut self, _event_group: &EventGroup) -> Pane {
+    async fn process_event(&mut self, event_groups: &Vec<EventGroup>) -> Pane {
         todo!()
+    }
+
+    async fn rollback_state(&mut self) -> bool {
+        self.state.rollback()
     }
 }
