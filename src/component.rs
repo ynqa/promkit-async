@@ -7,9 +7,9 @@ use tokio::sync::mpsc;
 use crate::EventGroup;
 
 #[async_trait]
-pub trait Component: Send + Sync {
+pub trait Component: Send + Sync + 'static {
     async fn subscribe(&self, events: mpsc::Receiver<&Vec<EventGroup>>);
-    async fn publish(&self, pane: mpsc::Sender<&Pane>);
+    async fn publish(&self, pane: mpsc::Sender<Pane>);
 }
 
 pub trait LoadingComponent: Component {
