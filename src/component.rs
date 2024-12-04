@@ -12,6 +12,7 @@ pub trait Component: Send + Sync + 'static {
     async fn publish(&self, pane: mpsc::Sender<Pane>);
 }
 
+#[async_trait]
 pub trait LoadingComponent: Component {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
