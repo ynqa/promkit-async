@@ -7,12 +7,9 @@ use tokio::sync::mpsc::Sender;
 
 use promkit_async::operator::EventGroup;
 
-pub type Handler = fn(&[EventGroup], &mut text_editor::State, &Sender<()>) -> anyhow::Result<()>;
+pub type Handler = fn(&[EventGroup], &mut text_editor::State) -> anyhow::Result<()>;
 
-pub fn default(
-    event_buffer: &[EventGroup],
-    state: &mut text_editor::State,
-) -> anyhow::Result<()> {
+pub fn default(event_buffer: &[EventGroup], state: &mut text_editor::State) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
             EventGroup::KeyBuffer(chars) => match state.edit_mode {

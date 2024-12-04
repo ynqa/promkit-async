@@ -8,7 +8,7 @@ use crate::EventGroup;
 
 #[async_trait]
 pub trait Component: Send + Sync + 'static {
-    async fn run(&mut self, rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>);
+    async fn run(&mut self, mut rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>);
 }
 
 #[async_trait]
