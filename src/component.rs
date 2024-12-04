@@ -1,5 +1,8 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use promkit::{grapheme::StyledGraphemes, pane::Pane};
@@ -42,20 +45,21 @@ impl<T: Clone + Send + Sync + 'static> StateHistory<T> {
         }
     }
 
-    pub fn with_current<F, R>(&self, f: F) -> R
+    pub async fn modify<F, Fut, R>(&self, f: F) -> R
     where
-        F: FnOnce(&T) -> R,
+        F: FnOnce(T) -> Fut + Send,
+        Fut: Future<Output = (T, R)> + Send,
+        R: Send,
+        T: Clone + Send,
     {
-        let inner = self.inner.lock().unwrap();
-        f(&inner.current)
-    }
+        let current = {
+            let inner = self.inner.lock().unwrap();
+            inner.current.clone()
+        };
 
-    pub fn with_current_mut<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        let mut inner = self.inner.lock().unwrap();
-        f(&mut inner.current)
+        let (new_state, result) = f(current).await;
+        self.update(new_state);
+        result
     }
 }
 

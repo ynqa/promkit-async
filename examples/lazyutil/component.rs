@@ -1,6 +1,11 @@
+use std::time::Duration;
+
 use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    time::sleep,
+};
 
 use promkit_async::{
     component::{Component, LoadingComponent, StateHistory},
@@ -36,12 +41,20 @@ impl Component for LazyComponent {
 #[async_trait::async_trait]
 impl LoadingComponent for LazyComponent {
     async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane {
-        self.state.with_current_mut(|state| {
-            if let Err(e) = self.keymap.get()(event_groups, state) {
-                eprintln!("Error processing event: {}", e);
-            }
-            state.create_pane(area.0, area.1)
-        })
+        let keymap = self.keymap.get();
+        let event_groups = event_groups.clone();
+        let area = area;
+
+        self.state
+            .modify(move |mut state| async move {
+                if let Err(e) = keymap(&event_groups, &mut state) {
+                    eprintln!("Error processing event: {}", e);
+                }
+                sleep(Duration::from_secs(1)).await;
+                let pane = state.create_pane(area.0, area.1);
+                (state, pane)
+            })
+            .await
     }
 
     async fn rollback_state(&mut self) -> bool {
