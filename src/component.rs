@@ -8,8 +8,7 @@ use crate::EventGroup;
 
 #[async_trait]
 pub trait Component: Send + Sync + 'static {
-    async fn subscribe(&self, events: mpsc::Receiver<Vec<EventGroup>>);
-    async fn publish(&self, pane: mpsc::Sender<Pane>);
+    async fn run(&mut self, rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>);
 }
 
 #[async_trait]
@@ -18,7 +17,7 @@ pub trait LoadingComponent: Component {
 
     async fn process_event(&mut self, event_group: &EventGroup) -> Pane;
 
-    async fn handle_event(&mut self, event_group: &EventGroup) -> Pane {
+    async fn run_loading(&mut self, event_group: &EventGroup) -> Pane {
         let (tx, mut rx) = mpsc::channel(1);
 
         tokio::select! {
@@ -39,6 +38,17 @@ pub trait LoadingComponent: Component {
                 result
             },
             Some(loading_pane) = rx.recv() => loading_pane,
+        }
+    }
+
+    async fn run(&mut self, mut rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>) {
+        while let Some(event_groups) = rx.recv().await {
+            for event_group in event_groups {
+                let pane = self.run_loading(&event_group).await;
+                if tx.send(pane).await.is_err() {
+                    return;
+                }
+            }
         }
     }
 }
