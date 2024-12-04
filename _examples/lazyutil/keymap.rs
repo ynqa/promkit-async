@@ -12,7 +12,6 @@ pub type Handler = fn(&[EventGroup], &mut text_editor::State, &Sender<()>) -> an
 pub fn default(
     event_buffer: &[EventGroup],
     state: &mut text_editor::State,
-    fin_sender: &Sender<()>,
 ) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
@@ -24,20 +23,6 @@ pub fn default(
                 state.texteditor.shift(*left, *right);
             }
             EventGroup::Others(e, times) => match e {
-                Event::Key(KeyEvent {
-                    code: KeyCode::Enter,
-                    modifiers: KeyModifiers::NONE,
-                    kind: KeyEventKind::Press,
-                    state: KeyEventState::NONE,
-                })
-                | Event::Key(KeyEvent {
-                    code: KeyCode::Char('c'),
-                    modifiers: KeyModifiers::CONTROL,
-                    kind: KeyEventKind::Press,
-                    state: KeyEventState::NONE,
-                }) => {
-                    fin_sender.try_send(())?;
-                }
                 Event::Key(KeyEvent {
                     code: KeyCode::Char('a'),
                     modifiers: KeyModifiers::CONTROL,

@@ -36,24 +36,6 @@ impl Drop for Prompt {
 }
 
 impl Prompt {
-    fn merge_pane_streams(&self) -> Pin<Box<SelectAll<impl Stream<Item = (Pane, usize)>>>> {
-        let streams: Vec<Pin<Box<dyn Stream<Item = (Pane, usize)> + Send>>> = self
-            .components
-            .iter()
-            .enumerate()
-            .map(|(index, component)| {
-                let receiver = component.pane_receiver();
-                let stream = Box::pin(futures::stream::unfold(receiver, |mut rx| async move {
-                    rx.next().await.map(|pane| (pane, rx))
-                }));
-                let mapped_stream = stream.map(move |pane| (pane, index));
-                Box::pin(mapped_stream) as Pin<Box<dyn Stream<Item = (Pane, usize)> + Send>>
-            })
-            .collect();
-
-        Box::pin(futures::stream::select_all(streams))
-    }
-
     pub async fn run(&mut self, delay: Duration) -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
@@ -71,14 +53,43 @@ impl Prompt {
             position: cursor::position()?,
         };
 
-        let mut pane_stream = self.merge_pane_streams();
         let mut stream = EventStream::new();
 
-        let mut panes = self
+        let mut panes: Vec<Pane> = self
             .components
             .iter()
             .map(|_| Pane::new(vec![StyledGraphemes::from("hi")], 0))
-            .collect::<Vec<Pane>>();
+            .collect();
+
+        let (event_senders, event_receivers): (
+            Vec<mpsc::Sender<&Vec<EventGroup>>>,
+            Vec<mpsc::Receiver<&Vec<EventGroup>>>,
+        ) = self.components.iter().map(|_| mpsc::channel(1)).unzip();
+
+        for (component, receiver) in self.components.iter().zip(event_receivers) {
+            tokio::spawn(async move { component.subscribe(receiver) });
+        }
+
+        let (pane_senders, pane_receivers): (Vec<mpsc::Sender<&Pane>>, Vec<mpsc::Receiver<&Pane>>) =
+            self.components.iter().map(|_| mpsc::channel(1)).unzip();
+
+        for (component, sender) in self.components.iter().zip(pane_senders) {
+            tokio::spawn(async move { component.publish(sender) });
+        }
+
+        let mut pane_stream = Box::pin(futures::stream::select_all(
+            pane_receivers
+                .iter()
+                .enumerate()
+                .map(|(index, receiver)| {
+                    let stream = Box::pin(futures::stream::unfold(receiver, |mut rx| async move {
+                        rx.recv().await.map(|pane| (pane, rx))
+                    }));
+                    let mapped_stream = stream.map(move |pane| (pane, index));
+                    Box::pin(mapped_stream) as Pin<Box<dyn Stream<Item = (&Pane, usize)> + Send>>
+                })
+                .collect(),
+        ));
 
         loop {
             tokio::select! {
@@ -94,8 +105,8 @@ impl Prompt {
                     event_sender.send(event).await?;
                 },
                 Some(event_group) = event_group_receiver.recv() => {
-                    for component in self.components.iter_mut() {
-                        let _ = component.event_group_sender().send(&event_group);
+                    for idx in 0..self.components.len() {
+                        let _ = event_senders[idx].send(&event_group);
                     }
                 },
                 Some((pane, index)) = pane_stream.next() => {

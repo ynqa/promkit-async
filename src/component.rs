@@ -1,17 +1,15 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::channel::mpsc;
 use promkit::{grapheme::StyledGraphemes, pane::Pane};
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc;
 
 use crate::EventGroup;
 
 #[async_trait]
-pub trait Component {
-    fn event_group_sender(&self) -> mpsc::Sender<&Vec<EventGroup>>;
-    fn pane_receiver(&self) -> mpsc::Receiver<Pane>;
-    async fn handle_event(&mut self, event_group: &EventGroup) -> Pane;
+pub trait Component: Send + Sync {
+    async fn subscribe(&self, events: mpsc::Receiver<&Vec<EventGroup>>);
+    async fn publish(&self, pane: mpsc::Sender<&Pane>);
 }
 
 pub trait LoadingComponent: Component {
@@ -20,7 +18,7 @@ pub trait LoadingComponent: Component {
     async fn process_event(&mut self, event_group: &EventGroup) -> Pane;
 
     async fn handle_event(&mut self, event_group: &EventGroup) -> Pane {
-        let (tx, mut rx) = channel(1);
+        let (tx, mut rx) = mpsc::channel(1);
 
         tokio::select! {
             _ = async {

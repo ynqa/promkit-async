@@ -11,7 +11,7 @@ use promkit_async::Prompt;
 use tokio::sync::mpsc;
 
 mod lazyutil;
-use lazyutil::{keymap, render};
+use lazyutil::{keymap, component};
 
 pub struct Lazy {
     keymap: ActiveKeySwitcher<keymap::Handler>,
@@ -39,18 +39,14 @@ impl Default for Lazy {
 }
 
 impl Lazy {
-    pub async fn run(self) -> anyhow::Result<String> {
-        let (fin_sender, fin_receiver) = mpsc::channel(1);
+    pub async fn run(self) -> anyhow::Result<()> {
         let (indexed_pane_sender, indexed_pane_receiver) = mpsc::channel(1);
         let (loading_activation_sender, loading_activation_receiver) = mpsc::channel(1);
 
-        let renderer = render::Renderer::new(
+        let renderer = component::LazyComponent::new(
             self.keymap,
             self.text_editor_state.clone(),
             self.text_editor_state.clone(),
-            fin_sender,
-            indexed_pane_sender,
-            loading_activation_sender,
         )?;
 
         let mut prompt = Prompt { renderer };
@@ -58,10 +54,6 @@ impl Lazy {
         prompt
             .run(
                 Duration::from_millis(10),
-                Duration::from_millis(10),
-                fin_receiver,
-                indexed_pane_receiver,
-                loading_activation_receiver,
             )
             .await
     }
@@ -69,6 +61,5 @@ impl Lazy {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("result: {:?}", Lazy::default().run().await?);
-    Ok(())
+    Lazy::default().run().await
 }

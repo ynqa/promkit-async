@@ -1,2 +1,2 @@
 pub mod keymap;
-pub mod render;
+pub mod component;
