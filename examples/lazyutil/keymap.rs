@@ -3,8 +3,6 @@ use promkit::{
     text_editor,
 };
 
-use tokio::sync::mpsc::Sender;
-
 use promkit_async::operator::EventGroup;
 
 pub type Handler = fn(&[EventGroup], &mut text_editor::State) -> anyhow::Result<()>;

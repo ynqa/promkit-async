@@ -1,11 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
+use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor};
 
-use futures::Future;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use promkit_async::{component::LoadingComponent, operator::EventGroup};
+use promkit_async::{
+    component::{Component, LoadingComponent},
+    operator::EventGroup,
+};
 
 use crate::lazyutil::keymap;
 
@@ -29,8 +31,16 @@ impl LazyComponent {
     }
 }
 
+#[async_trait::async_trait]
+impl Component for LazyComponent {
+    async fn run(&mut self, rx: Receiver<Vec<EventGroup>>, tx: Sender<Pane>) {
+        <Self as LoadingComponent>::run(self, rx, tx).await
+    }
+}
+
+#[async_trait::async_trait]
 impl LoadingComponent for LazyComponent {
-    async fn process_event(&mut self, event_group: &EventGroup) -> Pane {
+    async fn process_event(&mut self, _event_group: &EventGroup) -> Pane {
         todo!()
     }
 }

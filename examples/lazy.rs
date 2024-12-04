@@ -8,8 +8,6 @@ use promkit::{
 };
 use promkit_async::Prompt;
 
-use tokio::sync::mpsc;
-
 mod lazyutil;
 use lazyutil::{component, keymap};
 
@@ -40,9 +38,6 @@ impl Default for Lazy {
 
 impl Lazy {
     pub async fn run(self) -> anyhow::Result<()> {
-        let (indexed_pane_sender, indexed_pane_receiver) = mpsc::channel(1);
-        let (loading_activation_sender, loading_activation_receiver) = mpsc::channel(1);
-
         let component = component::LazyComponent::new(
             self.keymap,
             self.text_editor_state.clone(),
