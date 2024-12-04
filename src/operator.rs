@@ -5,7 +5,7 @@ use futures_timer::Delay;
 use promkit::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EventGroup {
@@ -16,26 +16,20 @@ pub enum EventGroup {
     Others(Event, usize),
 }
 
-pub struct TimeBasedOperator {
-    delay_duration: Duration,
-}
+pub struct TimeBasedOperator {}
 
 impl TimeBasedOperator {
-    pub fn new(delay_duration: Duration) -> Self {
-        TimeBasedOperator { delay_duration }
-    }
-
     pub fn run(
         &mut self,
-        mut receiver: Receiver<Event>,
-        sender: Sender<Vec<EventGroup>>,
+        delay: Duration,
+        mut receiver: mpsc::Receiver<Event>,
+        sender: mpsc::Sender<Vec<EventGroup>>,
     ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let mut buffer = Vec::new();
-        let delay_duration = self.delay_duration;
 
         async move {
             loop {
-                let delay = Delay::new(delay_duration);
+                let delay = Delay::new(delay);
                 futures::pin_mut!(delay);
 
                 tokio::select! {
@@ -48,7 +42,7 @@ impl TimeBasedOperator {
                     },
                     _ = delay => {
                         if !buffer.is_empty() {
-                            let bundles = Self::process_events(buffer.clone());
+                            let bundles = Self::process_events(&buffer);
                             if !bundles.is_empty() {
                                 sender.send(bundles).await?;
                             }
@@ -61,7 +55,7 @@ impl TimeBasedOperator {
         }
     }
 
-    fn process_events(events: Vec<Event>) -> Vec<EventGroup> {
+    fn process_events(events: &Vec<Event>) -> Vec<EventGroup> {
         let mut result = Vec::new();
         let mut current_chars = Vec::new();
         let mut current_vertical = (0, 0);
@@ -80,7 +74,7 @@ impl TimeBasedOperator {
                         &mut current_horizontal,
                         &mut current_others,
                     );
-                    last_resize = Some((width, height));
+                    last_resize = Some((*width, *height));
                     resize_index = Some(result.len());
                 }
                 event if Self::extract_char(&event).is_some() => {
@@ -115,7 +109,7 @@ impl TimeBasedOperator {
                     Self::flush_horizontal_buffer(&mut result, &mut current_horizontal);
 
                     match &mut current_others {
-                        Some((last_event, count)) if last_event == &event => {
+                        Some((last_event, count)) if last_event == event => {
                             *count += 1;
                         }
                         _ => {
@@ -375,7 +369,7 @@ mod tests {
                 EventGroup::KeyBuffer(vec!['d']),
             ];
 
-            assert_eq!(TimeBasedOperator::process_events(events), expected);
+            assert_eq!(TimeBasedOperator::process_events(&events), expected);
         }
 
         #[test]
@@ -397,7 +391,7 @@ mod tests {
                 1,
             )];
 
-            assert_eq!(TimeBasedOperator::process_events(events), expected);
+            assert_eq!(TimeBasedOperator::process_events(&events), expected);
         }
     }
 }
