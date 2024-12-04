@@ -1,7 +1,10 @@
 use std::{io, pin::Pin, time::Duration};
 
 use component::Component;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use crossterm::{
+    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
+    terminal,
+};
 use futures::stream::Stream;
 use futures::StreamExt;
 use promkit::{
@@ -54,6 +57,7 @@ impl Prompt {
             .map(|_| Pane::new(vec![StyledGraphemes::from("")], 0))
             .collect();
 
+        let terminal_area = terminal::size()?;
         let (event_senders, event_receivers): (
             Vec<mpsc::Sender<Vec<EventGroup>>>,
             Vec<mpsc::Receiver<Vec<EventGroup>>>,
@@ -67,7 +71,7 @@ impl Prompt {
             .zip(event_receivers)
             .zip(pane_senders)
             .map(|((mut component, event_rx), pane_tx)| {
-                tokio::spawn(async move { component.run(event_rx, pane_tx).await })
+                tokio::spawn(async move { component.run(terminal_area, event_rx, pane_tx).await })
             })
             .collect();
 

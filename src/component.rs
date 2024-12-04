@@ -69,19 +69,25 @@ impl<T: Clone + Send + Sync + 'static> Clone for StateHistory<T> {
 
 #[async_trait]
 pub trait Component: Send + Sync + 'static {
-    async fn run(&mut self, mut rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>);
+    async fn run(
+        &mut self,
+        area: (u16, u16),
+        mut rx: mpsc::Receiver<Vec<EventGroup>>,
+        tx: mpsc::Sender<Pane>,
+    );
 }
 
 #[async_trait]
 pub trait LoadingComponent: Component {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-    async fn process_event(&mut self, event_groups: &Vec<EventGroup>) -> Pane;
+    async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane;
 
     async fn rollback_state(&mut self) -> bool;
 
     async fn run_loading(
         &mut self,
+        area: (u16, u16),
         event_groups: &Vec<EventGroup>,
         cancel_rx: &mut mpsc::Receiver<()>,
     ) -> Option<Pane> {
@@ -101,7 +107,7 @@ pub trait LoadingComponent: Component {
                     frame_index = (frame_index + 1) % Self::LOADING_FRAMES.len();
                 }
             } => unreachable!(),
-            result = self.process_event(event_groups) => {
+            result = self.process_event(area, event_groups) => {
                 drop(loading_tx);
                 Some(result)
             },
@@ -114,7 +120,12 @@ pub trait LoadingComponent: Component {
         }
     }
 
-    async fn run(&mut self, mut rx: mpsc::Receiver<Vec<EventGroup>>, tx: mpsc::Sender<Pane>) {
+    async fn run(
+        &mut self,
+        area: (u16, u16),
+        mut rx: mpsc::Receiver<Vec<EventGroup>>,
+        tx: mpsc::Sender<Pane>,
+    ) {
         let mut current_cancel_tx: Option<mpsc::Sender<()>> = None;
 
         while let Some(event_groups) = rx.recv().await {
@@ -126,7 +137,7 @@ pub trait LoadingComponent: Component {
             current_cancel_tx = Some(new_cancel_tx);
 
             loop {
-                if let Some(pane) = self.run_loading(&event_groups, &mut cancel_rx).await {
+                if let Some(pane) = self.run_loading(area, &event_groups, &mut cancel_rx).await {
                     if tx.send(pane).await.is_err() {
                         return;
                     }
