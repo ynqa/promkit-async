@@ -95,14 +95,10 @@ pub trait LoadingComponent: Component {
         mut rx: mpsc::Receiver<Vec<EventGroup>>,
         tx: mpsc::Sender<Pane>,
     ) {
-        let frame_index = 0;
-        let interval = tokio::time::interval(Duration::from_millis(100));
-
         loop {
             if let Some(event_groups) = rx.recv().await {
                 let event_groups = event_groups.clone();
 
-                // イベント処理中の loading アニメーション
                 let loading_task = tokio::spawn({
                     let tx = tx.clone();
                     async move {
@@ -122,13 +118,10 @@ pub trait LoadingComponent: Component {
                     }
                 });
 
-                // イベントの処理
                 let result = self.process_event(area, &event_groups).await;
 
-                // loading タスクを終了
                 loading_task.abort();
 
-                // 処理結果を送信
                 if tx.send(result).await.is_err() {
                     return;
                 }
