@@ -51,7 +51,7 @@ impl LoadingComponent for LazyComponent {
                 if let Err(e) = keymap(&event_groups, &mut state) {
                     eprintln!("Error processing event: {}", e);
                 }
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(5)).await;
                 let pane = state.create_pane(area.0, area.1);
                 (state, pane)
             })
@@ -59,6 +59,6 @@ impl LoadingComponent for LazyComponent {
     }
 
     async fn rollback_state(&mut self) -> bool {
-        self.state.rollback()
+        self.state.rollback().await
     }
 }
