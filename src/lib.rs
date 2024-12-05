@@ -56,24 +56,6 @@ impl Prompt {
             .map(|_| Pane::new(vec![StyledGraphemes::from("")], 0))
             .collect();
 
-        // let terminal_area = terminal::size()?;
-        // let (event_senders, event_receivers): (
-        //     Vec<mpsc::Sender<Vec<EventGroup>>>,
-        //     Vec<mpsc::Receiver<Vec<EventGroup>>>,
-        // ) = (0..component_count).map(|_| mpsc::channel(1)).unzip();
-
-        // let (pane_senders, pane_receivers): (Vec<mpsc::Sender<Pane>>, Vec<mpsc::Receiver<Pane>>) =
-        //     (0..component_count).map(|_| mpsc::channel(1)).unzip();
-
-        // let component_handles: Vec<_> = components
-        //     .into_iter()
-        //     .zip(event_receivers)
-        //     .zip(pane_senders)
-        //     .map(|((mut component, event_rx), pane_tx)| {
-        //         tokio::spawn(async move { component.run(terminal_area, event_rx, pane_tx).await })
-        //     })
-        //     .collect();
-
         let pane_stream = futures::stream::select_all(
             receivers
                 .into_iter()
@@ -134,9 +116,6 @@ impl Prompt {
         }
 
         operator_handle.abort();
-        // for handle in component_handles {
-        //     handle.abort();
-        // }
 
         result
     }
