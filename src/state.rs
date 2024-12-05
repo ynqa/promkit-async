@@ -36,7 +36,7 @@ impl<T: Clone + Send + Sync + 'static> StateHistory<T> {
         }
     }
 
-    pub async fn modify<F, Fut, R>(&self, f: F) -> R
+    pub async fn current_mut<F, Fut, R>(&self, f: F) -> R
     where
         F: FnOnce(T) -> Fut + Send,
         Fut: Future<Output = (T, R)> + Send,

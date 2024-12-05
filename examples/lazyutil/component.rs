@@ -48,7 +48,7 @@ impl LoadingComponent for LazyComponent {
         let area = area;
 
         self.state
-            .modify(move |mut state| async move {
+            .current_mut(move |mut state| async move {
                 if let Err(e) = keymap(&event_groups, &mut state) {
                     eprintln!("Error processing event: {}", e);
                 }
