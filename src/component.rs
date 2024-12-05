@@ -109,28 +109,25 @@ pub trait LoadingComponent: Component + Clone {
             let loading_state = loading_state.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_millis(20));
+                let mut interval = tokio::time::interval(Duration::from_millis(100));
                 loop {
                     interval.tick().await;
 
-                    let (is_loading, frame_index) = {
-                        let mut state = loading_state.lock().await;
-                        if !state.is_loading {
-                            continue;
-                        }
-                        let frame_index = state.frame_index;
-                        state.frame_index = (state.frame_index + 1) % Self::LOADING_FRAMES.len();
-                        (true, frame_index)
-                    };
+                    let mut state = loading_state.lock().await;
+                    if !state.is_loading {
+                        continue;
+                    }
 
-                    if is_loading {
-                        let loading_pane = Pane::new(
-                            vec![StyledGraphemes::from(Self::LOADING_FRAMES[frame_index])],
-                            0,
-                        );
-                        if tx.send(loading_pane).await.is_err() {
-                            break;
-                        }
+                    let frame_index = state.frame_index;
+                    state.frame_index = (state.frame_index + 1) % Self::LOADING_FRAMES.len();
+                    drop(state);
+
+                    let loading_pane = Pane::new(
+                        vec![StyledGraphemes::from(Self::LOADING_FRAMES[frame_index])],
+                        0,
+                    );
+                    if tx.send(loading_pane).await.is_err() {
+                        break;
                     }
                 }
             })
@@ -141,6 +138,10 @@ pub trait LoadingComponent: Component + Clone {
                 Some(event_groups) = rx.recv() => {
                     if let Some(task) = current_task.take() {
                         task.abort();
+                        {
+                            let mut state = loading_state.lock().await;
+                            state.is_loading = false;
+                        }
                     }
 
                     let event_groups = event_groups.clone();
@@ -150,10 +151,15 @@ pub trait LoadingComponent: Component + Clone {
                     let process_task = {
                         let mut this = self.clone();
                         tokio::spawn(async move {
-                            let mut state = loading_state.lock().await;
-                            state.is_loading = true;
+                            {
+                                let mut state = loading_state.lock().await;
+                                state.is_loading = true;
+                            }
                             let result = this.process_event(area, &event_groups).await;
-                            state.is_loading = false;
+                            {
+                                let mut state = loading_state.lock().await;
+                                state.is_loading = false;
+                            }
                             tx_clone.send(result).await
                         })
                     };
