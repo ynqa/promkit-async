@@ -14,7 +14,7 @@ struct LoadingState {
 }
 
 #[async_trait]
-pub trait LoadingComponent: Component + Clone {
+pub trait LoadingComponent: Send + Sync + 'static + Clone {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
     async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane;
