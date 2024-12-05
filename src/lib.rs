@@ -1,10 +1,6 @@
 use std::{io, pin::Pin, time::Duration};
 
-use component::Component;
-use crossterm::{
-    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
-    terminal,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use futures::stream::Stream;
 use futures::StreamExt;
 use promkit::{
@@ -39,7 +35,8 @@ impl Drop for Prompt {
 impl Prompt {
     pub async fn run(
         &mut self,
-        components: Vec<Box<dyn Component>>,
+        senders: Vec<mpsc::Sender<Vec<EventGroup>>>,
+        receivers: Vec<mpsc::Receiver<Pane>>,
         delay: Duration,
     ) -> anyhow::Result<()> {
         enable_raw_mode()?;
@@ -55,31 +52,30 @@ impl Prompt {
                 .await
         });
 
-        let component_count = components.len();
-        let mut panes: Vec<Pane> = (0..component_count)
+        let mut panes: Vec<Pane> = (0..receivers.len())
             .map(|_| Pane::new(vec![StyledGraphemes::from("")], 0))
             .collect();
 
-        let terminal_area = terminal::size()?;
-        let (event_senders, event_receivers): (
-            Vec<mpsc::Sender<Vec<EventGroup>>>,
-            Vec<mpsc::Receiver<Vec<EventGroup>>>,
-        ) = (0..component_count).map(|_| mpsc::channel(1)).unzip();
+        // let terminal_area = terminal::size()?;
+        // let (event_senders, event_receivers): (
+        //     Vec<mpsc::Sender<Vec<EventGroup>>>,
+        //     Vec<mpsc::Receiver<Vec<EventGroup>>>,
+        // ) = (0..component_count).map(|_| mpsc::channel(1)).unzip();
 
-        let (pane_senders, pane_receivers): (Vec<mpsc::Sender<Pane>>, Vec<mpsc::Receiver<Pane>>) =
-            (0..component_count).map(|_| mpsc::channel(1)).unzip();
+        // let (pane_senders, pane_receivers): (Vec<mpsc::Sender<Pane>>, Vec<mpsc::Receiver<Pane>>) =
+        //     (0..component_count).map(|_| mpsc::channel(1)).unzip();
 
-        let component_handles: Vec<_> = components
-            .into_iter()
-            .zip(event_receivers)
-            .zip(pane_senders)
-            .map(|((mut component, event_rx), pane_tx)| {
-                tokio::spawn(async move { component.run(terminal_area, event_rx, pane_tx).await })
-            })
-            .collect();
+        // let component_handles: Vec<_> = components
+        //     .into_iter()
+        //     .zip(event_receivers)
+        //     .zip(pane_senders)
+        //     .map(|((mut component, event_rx), pane_tx)| {
+        //         tokio::spawn(async move { component.run(terminal_area, event_rx, pane_tx).await })
+        //     })
+        //     .collect();
 
         let pane_stream = futures::stream::select_all(
-            pane_receivers
+            receivers
                 .into_iter()
                 .enumerate()
                 .map(|(index, rx)| {
@@ -117,7 +113,7 @@ impl Prompt {
                     }
                 },
                 Some(event_groups) = event_group_receiver.recv() => {
-                    for sender in &event_senders {
+                    for sender in &senders {
                         if let Err(e) = sender.send(event_groups.clone()).await {
                             result = Err(anyhow::anyhow!("Failed to send event groups: {}", e));
                             break 'main;
@@ -138,9 +134,9 @@ impl Prompt {
         }
 
         operator_handle.abort();
-        for handle in component_handles {
-            handle.abort();
-        }
+        // for handle in component_handles {
+        //     handle.abort();
+        // }
 
         result
     }

@@ -1,15 +1,17 @@
 use std::time::Duration;
 
+use crossterm::terminal;
 use promkit::{
     crossterm::style::Color,
     style::StyleBuilder,
     switch::ActiveKeySwitcher,
     text_editor::{self},
 };
-use promkit_async::Prompt;
+use promkit_async::{component::LoadingComponent, Prompt};
 
 mod lazyutil;
-use lazyutil::{component, keymap};
+use lazyutil::{component::LazyComponent, keymap};
+use tokio::sync::mpsc;
 
 pub struct Lazy {
     keymap: ActiveKeySwitcher<keymap::Handler>,
@@ -38,11 +40,19 @@ impl Default for Lazy {
 
 impl Lazy {
     pub async fn run(self) -> anyhow::Result<()> {
-        let component = component::LazyComponent::new(self.keymap, self.text_editor_state.clone())?;
+        let mut component = LazyComponent::new(self.keymap, self.text_editor_state.clone())?;
+        let (event_tx, event_rx) = mpsc::channel(1);
+        let (pane_tx, pane_rx) = mpsc::channel(1);
+        let terminal_area = terminal::size()?;
+        let handle =
+            tokio::spawn(async move { component.run(terminal_area, event_rx, pane_tx).await });
 
         Prompt {}
-            .run(vec![Box::new(component)], Duration::from_millis(100))
-            .await
+            .run(vec![event_tx], vec![pane_rx], Duration::from_millis(100))
+            .await?;
+
+        handle.abort();
+        Ok(())
     }
 }
 

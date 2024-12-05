@@ -5,7 +5,6 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use super::Component;
 use crate::EventGroup;
 
 struct LoadingState {
@@ -14,16 +13,13 @@ struct LoadingState {
 }
 
 #[async_trait]
-pub trait LoadingComponent: Send + Sync + 'static + Clone {
+pub trait LoadingComponent: Clone + Send + Sync + 'static {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
     async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane;
 
     async fn rollback_state(&mut self) -> bool;
-}
 
-#[async_trait]
-impl<T: LoadingComponent> Component for T {
     async fn run(
         &mut self,
         area: (u16, u16),
