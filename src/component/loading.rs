@@ -16,7 +16,7 @@ pub trait LoadingComponent<T: Clone + Send + Sync + 'static>:
 {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-    async fn process_event(&mut self, area: (u16, u16), event_groups: T) -> Pane;
+    async fn process_event(&mut self, area: (u16, u16), inputs: T) -> Pane;
 
     async fn rollback_state(&mut self) -> bool;
 
@@ -59,7 +59,7 @@ pub trait LoadingComponent<T: Clone + Send + Sync + 'static>:
 
         loop {
             tokio::select! {
-                Some(event_groups) = rx.recv() => {
+                Some(inputs) = rx.recv() => {
                     if let Some(task) = current_task.take() {
                         task.abort();
                         {
@@ -68,7 +68,7 @@ pub trait LoadingComponent<T: Clone + Send + Sync + 'static>:
                         }
                     }
 
-                    let event_groups = event_groups.clone();
+                    let inputs = inputs.clone();
                     let tx_clone = tx.clone();
                     let loading_state = loading_state.clone();
 
@@ -79,7 +79,7 @@ pub trait LoadingComponent<T: Clone + Send + Sync + 'static>:
                                 let mut state = loading_state.lock().await;
                                 state.is_loading = true;
                             }
-                            let result = this.process_event(area, event_groups).await;
+                            let result = this.process_event(area, inputs).await;
                             {
                                 let mut state = loading_state.lock().await;
                                 state.is_loading = false;
