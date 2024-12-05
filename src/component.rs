@@ -89,63 +89,48 @@ pub trait LoadingComponent: Component {
 
     async fn rollback_state(&mut self) -> bool;
 
-    async fn run_loading(
-        &mut self,
-        area: (u16, u16),
-        event_groups: &Vec<EventGroup>,
-        cancel_rx: &mut mpsc::Receiver<()>,
-    ) -> Option<Pane> {
-        let (loading_tx, mut loading_rx): (mpsc::Sender<Pane>, mpsc::Receiver<Pane>) =
-            mpsc::channel(1);
-
-        tokio::select! {
-            _ = async {
-                let mut frame_index = 0;
-                let mut interval = tokio::time::interval(Duration::from_millis(100));
-                loop {
-                    interval.tick().await;
-                    let _ = loading_tx.send(Pane::new(
-                        vec![StyledGraphemes::from(Self::LOADING_FRAMES[frame_index])],
-                        0,
-                    )).await;
-                    frame_index = (frame_index + 1) % Self::LOADING_FRAMES.len();
-                }
-            } => unreachable!(),
-            result = self.process_event(area, event_groups) => {
-                drop(loading_tx);
-                Some(result)
-            },
-            Some(loading_pane) = loading_rx.recv() => Some(loading_pane),
-            _ = cancel_rx.recv() => {
-                drop(loading_tx);
-                self.rollback_state().await;
-                None
-            }
-        }
-    }
-
     async fn run(
         &mut self,
         area: (u16, u16),
         mut rx: mpsc::Receiver<Vec<EventGroup>>,
         tx: mpsc::Sender<Pane>,
     ) {
-        let mut current_cancel_tx: Option<mpsc::Sender<()>> = None;
+        let frame_index = 0;
+        let interval = tokio::time::interval(Duration::from_millis(100));
 
-        while let Some(event_groups) = rx.recv().await {
-            if let Some(cancel_tx) = current_cancel_tx.take() {
-                let _ = cancel_tx.send(()).await;
-            }
+        loop {
+            if let Some(event_groups) = rx.recv().await {
+                let event_groups = event_groups.clone();
 
-            let (new_cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
-            current_cancel_tx = Some(new_cancel_tx);
-
-            loop {
-                if let Some(pane) = self.run_loading(area, &event_groups, &mut cancel_rx).await {
-                    if tx.send(pane).await.is_err() {
-                        return;
+                // イベント処理中の loading アニメーション
+                let loading_task = tokio::spawn({
+                    let tx = tx.clone();
+                    async move {
+                        let mut frame_index = 0;
+                        let mut interval = tokio::time::interval(Duration::from_millis(100));
+                        loop {
+                            let loading_pane = Pane::new(
+                                vec![StyledGraphemes::from(Self::LOADING_FRAMES[frame_index])],
+                                0,
+                            );
+                            if tx.send(loading_pane).await.is_err() {
+                                break;
+                            }
+                            frame_index = (frame_index + 1) % Self::LOADING_FRAMES.len();
+                            interval.tick().await;
+                        }
                     }
-                    break;
+                });
+
+                // イベントの処理
+                let result = self.process_event(area, &event_groups).await;
+
+                // loading タスクを終了
+                loading_task.abort();
+
+                // 処理結果を送信
+                if tx.send(result).await.is_err() {
+                    return;
                 }
             }
         }

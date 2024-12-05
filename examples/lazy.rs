@@ -41,7 +41,7 @@ impl Lazy {
         let component = component::LazyComponent::new(self.keymap, self.text_editor_state.clone())?;
 
         Prompt {}
-            .run(vec![Box::new(component)], Duration::from_millis(10))
+            .run(vec![Box::new(component)], Duration::from_millis(100))
             .await
     }
 }
