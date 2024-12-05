@@ -27,8 +27,8 @@ impl LazyComponent {
 }
 
 #[async_trait::async_trait]
-impl LoadingComponent for LazyComponent {
-    async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane {
+impl LoadingComponent<Vec<EventGroup>> for LazyComponent {
+    async fn process_event(&mut self, area: (u16, u16), event_groups: Vec<EventGroup>) -> Pane {
         let keymap = self.keymap.get();
         let event_groups = event_groups.clone();
         let area = area;

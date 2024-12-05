@@ -5,27 +5,22 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::EventGroup;
-
 struct LoadingState {
     is_loading: bool,
     frame_index: usize,
 }
 
 #[async_trait]
-pub trait LoadingComponent: Clone + Send + Sync + 'static {
+pub trait LoadingComponent<T: Clone + Send + Sync + 'static>:
+    Clone + Send + Sync + 'static
+{
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-    async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane;
+    async fn process_event(&mut self, area: (u16, u16), event_groups: T) -> Pane;
 
     async fn rollback_state(&mut self) -> bool;
 
-    async fn run(
-        &mut self,
-        area: (u16, u16),
-        mut rx: mpsc::Receiver<Vec<EventGroup>>,
-        tx: mpsc::Sender<Pane>,
-    ) {
+    async fn run(&mut self, area: (u16, u16), mut rx: mpsc::Receiver<T>, tx: mpsc::Sender<Pane>) {
         let mut current_task: Option<JoinHandle<Result<(), mpsc::error::SendError<Pane>>>> = None;
         let loading_state = Arc::new(Mutex::new(LoadingState {
             is_loading: false,
@@ -84,7 +79,7 @@ pub trait LoadingComponent: Clone + Send + Sync + 'static {
                                 let mut state = loading_state.lock().await;
                                 state.is_loading = true;
                             }
-                            let result = this.process_event(area, &event_groups).await;
+                            let result = this.process_event(area, event_groups).await;
                             {
                                 let mut state = loading_state.lock().await;
                                 state.is_loading = false;
