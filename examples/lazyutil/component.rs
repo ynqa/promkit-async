@@ -2,16 +2,9 @@ use std::time::Duration;
 
 use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
 
-use tokio::{
-    sync::mpsc::{Receiver, Sender},
-    time::sleep,
-};
+use tokio::time::sleep;
 
-use promkit_async::{
-    component::{Component, LoadingComponent},
-    snapshot::AsyncSnapshot,
-    EventGroup,
-};
+use promkit_async::{component::LoadingComponent, snapshot::AsyncSnapshot, EventGroup};
 
 use crate::lazyutil::keymap;
 
@@ -30,13 +23,6 @@ impl LazyComponent {
             keymap,
             state: AsyncSnapshot::new(state),
         })
-    }
-}
-
-#[async_trait::async_trait]
-impl Component for LazyComponent {
-    async fn run(&mut self, area: (u16, u16), rx: Receiver<Vec<EventGroup>>, tx: Sender<Pane>) {
-        <Self as LoadingComponent>::run(self, area, rx, tx).await
     }
 }
 

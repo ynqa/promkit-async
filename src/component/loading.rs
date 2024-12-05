@@ -20,7 +20,10 @@ pub trait LoadingComponent: Component + Clone {
     async fn process_event(&mut self, area: (u16, u16), event_groups: &Vec<EventGroup>) -> Pane;
 
     async fn rollback_state(&mut self) -> bool;
+}
 
+#[async_trait]
+impl<T: LoadingComponent> Component for T {
     async fn run(
         &mut self,
         area: (u16, u16),
