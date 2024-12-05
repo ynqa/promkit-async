@@ -9,7 +9,7 @@ use tokio::{
 
 use promkit_async::{
     component::{Component, LoadingComponent},
-    state::StateHistory,
+    snapshot::AsyncSnapshot,
     EventGroup,
 };
 
@@ -18,7 +18,7 @@ use crate::lazyutil::keymap;
 #[derive(Clone)]
 pub struct LazyComponent {
     keymap: ActiveKeySwitcher<keymap::Handler>,
-    state: StateHistory<text_editor::State>,
+    state: AsyncSnapshot<text_editor::State>,
 }
 
 impl LazyComponent {
@@ -28,7 +28,7 @@ impl LazyComponent {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             keymap,
-            state: StateHistory::new(state),
+            state: AsyncSnapshot::new(state),
         })
     }
 }

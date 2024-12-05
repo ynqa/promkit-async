@@ -1,19 +1,19 @@
 use std::{future::Future, sync::Arc};
 use tokio::sync::Mutex;
 
-pub struct StateHistory<T> {
-    inner: Arc<Mutex<StateHistoryInner<T>>>,
+pub struct AsyncSnapshot<T> {
+    inner: Arc<Mutex<AsyncSnapshotInner<T>>>,
 }
 
-struct StateHistoryInner<T> {
+struct AsyncSnapshotInner<T> {
     current: T,
     previous: Option<T>,
 }
 
-impl<T: Clone + Send + Sync + 'static> StateHistory<T> {
+impl<T: Clone + Send + Sync + 'static> AsyncSnapshot<T> {
     pub fn new(initial: T) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(StateHistoryInner {
+            inner: Arc::new(Mutex::new(AsyncSnapshotInner {
                 current: initial,
                 previous: None,
             })),
@@ -54,7 +54,7 @@ impl<T: Clone + Send + Sync + 'static> StateHistory<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> Clone for StateHistory<T> {
+impl<T: Clone + Send + Sync + 'static> Clone for AsyncSnapshot<T> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),

@@ -25,7 +25,7 @@ pub mod event;
 pub use event::EventGroup;
 pub mod operator;
 use operator::TimeBasedOperator;
-pub mod state;
+pub mod snapshot;
 
 pub struct Prompt {}
 
