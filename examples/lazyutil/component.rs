@@ -14,6 +14,7 @@ use promkit_async::{
 
 use crate::lazyutil::keymap;
 
+#[derive(Clone)]
 pub struct LazyComponent {
     keymap: ActiveKeySwitcher<keymap::Handler>,
     state: StateHistory<text_editor::State>,
