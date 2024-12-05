@@ -8,8 +8,9 @@ use tokio::{
 };
 
 use promkit_async::{
-    component::{Component, LoadingComponent, StateHistory},
-    operator::EventGroup,
+    component::{Component, LoadingComponent},
+    state::StateHistory,
+    EventGroup,
 };
 
 use crate::lazyutil::keymap;

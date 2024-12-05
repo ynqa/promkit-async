@@ -7,14 +7,7 @@ use promkit::crossterm::event::{
 };
 use tokio::sync::mpsc;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum EventGroup {
-    KeyBuffer(Vec<char>),
-    VerticalCursorBuffer(usize, usize),   // (up, down)
-    HorizontalCursorBuffer(usize, usize), // (left, right)
-    LastResize(u16, u16),                 // (width, height)
-    Others(Event, usize),
-}
+use crate::event::EventGroup;
 
 pub struct TimeBasedOperator {}
 

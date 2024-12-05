@@ -3,7 +3,7 @@ use promkit::{
     text_editor,
 };
 
-use promkit_async::operator::EventGroup;
+use promkit_async::EventGroup;
 
 pub type Handler = fn(&[EventGroup], &mut text_editor::State) -> anyhow::Result<()>;
 

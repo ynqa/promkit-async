@@ -21,8 +21,11 @@ use promkit::{
 use tokio::sync::mpsc;
 
 pub mod component;
+pub mod event;
+pub use event::EventGroup;
 pub mod operator;
-use operator::{EventGroup, TimeBasedOperator};
+use operator::TimeBasedOperator;
+pub mod state;
 
 pub struct Prompt {}
 
