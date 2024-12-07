@@ -7,6 +7,18 @@ use promkit_async::EventGroup;
 
 pub type Handler = fn(&[EventGroup], &mut text_editor::State) -> anyhow::Result<()>;
 
+pub fn movement(event_buffer: &[EventGroup], state: &mut text_editor::State) -> anyhow::Result<()> {
+    for event in event_buffer {
+        match event {
+            EventGroup::HorizontalCursorBuffer(left, right) => {
+                state.texteditor.shift(*left, *right);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 pub fn default(event_buffer: &[EventGroup], state: &mut text_editor::State) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
