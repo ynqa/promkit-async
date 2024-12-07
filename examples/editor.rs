@@ -7,7 +7,7 @@ use promkit::{
     text_editor::{self},
 };
 use promkit_async::{
-    component::{Evaluator, SyncComponent},
+    component::{Evaluator, InputProcessor},
     Prompt,
 };
 

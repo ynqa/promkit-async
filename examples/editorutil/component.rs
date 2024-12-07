@@ -5,7 +5,7 @@ use promkit::{pane::Pane, switch::ActiveKeySwitcher, text_editor, PaneFactory};
 use tokio::{sync::mpsc, time::sleep};
 
 use promkit_async::{
-    component::{Evaluator, SyncComponent},
+    component::{Evaluator, InputProcessor},
     snapshot::AsyncSnapshot,
     EventGroup,
 };
@@ -28,7 +28,7 @@ impl EditorComponent {
     }
 }
 
-impl SyncComponent<Vec<EventGroup>> for EditorComponent {
+impl InputProcessor<Vec<EventGroup>> for EditorComponent {
     fn process_event(&mut self, area: (u16, u16), inputs: Vec<EventGroup>) -> Pane {
         let keymap = self.keymap.get();
         if let Err(e) = keymap(&inputs, &mut self.state) {

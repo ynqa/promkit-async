@@ -3,7 +3,7 @@ use promkit::pane::Pane;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 #[async_trait]
-pub trait SyncComponent<I: Clone + Send + Sync + 'static> {
+pub trait InputProcessor<I: Clone + Send + Sync + 'static> {
     fn process_event(&mut self, area: (u16, u16), inputs: I) -> Pane;
 
     async fn run(&mut self, area: (u16, u16), mut rx: Receiver<I>, tx: Sender<Pane>) {
