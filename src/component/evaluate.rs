@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::EventGroup;
+use crate::Event;
 
 #[derive(Clone, PartialEq)]
 enum State {
@@ -25,13 +25,13 @@ pub trait Evaluator: Clone + Send + Sync + 'static {
     const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
     async fn process_query(&mut self, area: (u16, u16), query: String) -> Pane;
-    async fn process_events(&mut self, area: (u16, u16), events: Vec<EventGroup>) -> Pane;
+    async fn process_events(&mut self, area: (u16, u16), events: Vec<Event>) -> Pane;
 
     async fn run(
         &mut self,
         area: (u16, u16),
         mut query_rx: mpsc::Receiver<String>,
-        mut events_rx: mpsc::Receiver<Vec<EventGroup>>,
+        mut events_rx: mpsc::Receiver<Vec<Event>>,
         tx: mpsc::Sender<Pane>,
     ) {
         let mut current_task: Option<JoinHandle<Result<(), mpsc::error::SendError<Pane>>>> = None;
@@ -39,7 +39,7 @@ pub trait Evaluator: Clone + Send + Sync + 'static {
             frame_index: 0,
             state: State::Idle,
         }));
-        let mut event_queue: VecDeque<Vec<EventGroup>> = VecDeque::new();
+        let mut event_queue: VecDeque<Vec<Event>> = VecDeque::new();
 
         let loading_task = {
             let loading_state = loading_state.clone();

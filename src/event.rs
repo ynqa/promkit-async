@@ -1,10 +1,10 @@
-use promkit::crossterm::event::Event;
+use promkit::crossterm;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum EventGroup {
+pub enum Event {
     KeyBuffer(Vec<char>),
     VerticalCursorBuffer(usize, usize),   // (up, down)
     HorizontalCursorBuffer(usize, usize), // (left, right)
     LastResize(u16, u16),                 // (width, height)
-    Others(Event, usize),
+    Others(crossterm::event::Event, usize),
 }

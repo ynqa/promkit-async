@@ -7,7 +7,7 @@ use tokio::{sync::mpsc, time::sleep};
 use promkit_async::{
     component::{Evaluator, InputProcessor},
     snapshot::AsyncSnapshot,
-    EventGroup,
+    Event,
 };
 
 use crate::editorutil::keymap;
@@ -28,8 +28,8 @@ impl EditorComponent {
     }
 }
 
-impl InputProcessor<Vec<EventGroup>> for EditorComponent {
-    fn process_event(&mut self, area: (u16, u16), inputs: Vec<EventGroup>) -> Pane {
+impl InputProcessor<Vec<Event>> for EditorComponent {
+    fn process_event(&mut self, area: (u16, u16), inputs: Vec<Event>) -> Pane {
         let keymap = self.keymap.get();
         if let Err(e) = keymap(&inputs, &mut self.state) {
             eprintln!("Error processing event: {}", e);
@@ -60,7 +60,7 @@ impl HeavySyncComponent {
 
 #[async_trait::async_trait]
 impl Evaluator for HeavySyncComponent {
-    async fn process_events(&mut self, area: (u16, u16), events: Vec<EventGroup>) -> Pane {
+    async fn process_events(&mut self, area: (u16, u16), events: Vec<Event>) -> Pane {
         let keymap = self.keymap.get();
         self.state
             .current_mut(move |mut state| async move {

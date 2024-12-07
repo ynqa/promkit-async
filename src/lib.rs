@@ -1,24 +1,20 @@
 use std::{io, pin::Pin, time::Duration};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use crossterm::{
+    self, cursor,
+    event::EventStream,
+    event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
 use futures::stream::Stream;
 use futures::StreamExt;
-use promkit::{
-    crossterm::{
-        cursor,
-        event::EventStream,
-        execute,
-        terminal::{disable_raw_mode, enable_raw_mode},
-    },
-    grapheme::StyledGraphemes,
-    pane::Pane,
-    terminal::Terminal,
-};
+use promkit::{grapheme::StyledGraphemes, pane::Pane, terminal::Terminal};
 use tokio::sync::mpsc;
 
 pub mod component;
 pub mod event;
-pub use event::EventGroup;
+pub use event::Event;
 pub mod operator;
 use operator::TimeBasedOperator;
 pub mod snapshot;
@@ -35,7 +31,7 @@ impl Drop for Prompt {
 impl Prompt {
     pub async fn run(
         &mut self,
-        senders: Vec<mpsc::Sender<Vec<EventGroup>>>,
+        senders: Vec<mpsc::Sender<Vec<Event>>>,
         receivers: Vec<mpsc::Receiver<Pane>>,
         delay: Duration,
     ) -> anyhow::Result<()> {
@@ -81,7 +77,7 @@ impl Prompt {
         'main: loop {
             tokio::select! {
                 Some(Ok(event)) = stream.next() => {
-                    if event == Event::Key(KeyEvent {
+                    if event == crossterm::event::Event::Key(KeyEvent {
                         code: KeyCode::Esc,
                         modifiers: KeyModifiers::NONE,
                         kind: KeyEventKind::Press,

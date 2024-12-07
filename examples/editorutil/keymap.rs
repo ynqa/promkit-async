@@ -1,16 +1,19 @@
 use promkit::{
-    crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
+    crossterm::{
+        self,
+        event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
+    },
     text_editor,
 };
 
-use promkit_async::EventGroup;
+use promkit_async::Event;
 
-pub type Handler = fn(&[EventGroup], &mut text_editor::State) -> anyhow::Result<()>;
+pub type Handler = fn(&[Event], &mut text_editor::State) -> anyhow::Result<()>;
 
-pub fn movement(event_buffer: &[EventGroup], state: &mut text_editor::State) -> anyhow::Result<()> {
+pub fn movement(event_buffer: &[Event], state: &mut text_editor::State) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
-            EventGroup::HorizontalCursorBuffer(left, right) => {
+            Event::HorizontalCursorBuffer(left, right) => {
                 state.texteditor.shift(*left, *right);
             }
             _ => {}
@@ -19,24 +22,24 @@ pub fn movement(event_buffer: &[EventGroup], state: &mut text_editor::State) -> 
     Ok(())
 }
 
-pub fn default(event_buffer: &[EventGroup], state: &mut text_editor::State) -> anyhow::Result<()> {
+pub fn default(event_buffer: &[Event], state: &mut text_editor::State) -> anyhow::Result<()> {
     for event in event_buffer {
         match event {
-            EventGroup::KeyBuffer(chars) => match state.edit_mode {
+            Event::KeyBuffer(chars) => match state.edit_mode {
                 text_editor::Mode::Insert => state.texteditor.insert_chars(&chars),
                 text_editor::Mode::Overwrite => state.texteditor.overwrite_chars(&chars),
             },
-            EventGroup::HorizontalCursorBuffer(left, right) => {
+            Event::HorizontalCursorBuffer(left, right) => {
                 state.texteditor.shift(*left, *right);
             }
-            EventGroup::Others(e, times) => match e {
-                Event::Key(KeyEvent {
+            Event::Others(e, times) => match e {
+                crossterm::event::Event::Key(KeyEvent {
                     code: KeyCode::Char('a'),
                     modifiers: KeyModifiers::CONTROL,
                     kind: KeyEventKind::Press,
                     state: KeyEventState::NONE,
                 }) => state.texteditor.move_to_head(),
-                Event::Key(KeyEvent {
+                crossterm::event::Event::Key(KeyEvent {
                     code: KeyCode::Char('e'),
                     modifiers: KeyModifiers::CONTROL,
                     kind: KeyEventKind::Press,
@@ -44,7 +47,7 @@ pub fn default(event_buffer: &[EventGroup], state: &mut text_editor::State) -> a
                 }) => state.texteditor.move_to_tail(),
 
                 // Erase char(s).
-                Event::Key(KeyEvent {
+                crossterm::event::Event::Key(KeyEvent {
                     code: KeyCode::Backspace,
                     modifiers: KeyModifiers::NONE,
                     kind: KeyEventKind::Press,
@@ -54,7 +57,7 @@ pub fn default(event_buffer: &[EventGroup], state: &mut text_editor::State) -> a
                         state.texteditor.erase();
                     }
                 }
-                Event::Key(KeyEvent {
+                crossterm::event::Event::Key(KeyEvent {
                     code: KeyCode::Char('u'),
                     modifiers: KeyModifiers::CONTROL,
                     kind: KeyEventKind::Press,
