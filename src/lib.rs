@@ -49,7 +49,7 @@ impl Prompt {
         });
 
         let mut panes: Vec<Pane> = (0..receivers.len())
-            .map(|_| Pane::new(vec![StyledGraphemes::from("")], 0))
+            .map(|_| Pane::new(vec![StyledGraphemes::from(" ")], 0))
             .collect();
 
         let pane_stream = futures::stream::select_all(
