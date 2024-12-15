@@ -19,6 +19,11 @@ async-trait = "0.1.83"
 crossterm = { version = "0.28.1", features = ["use-dev-tty", "event-stream", "libc"] }
 futures = "0.3.30"
 futures-timer = "3.0.3"
-promkit = "0.5.1"
+promkit = "0.6.0"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-stream = "0.1.16"
+
+jaq-core = "1.2.1"
+jaq-interpret = "1.2.1"
+jaq-parse = "1.0.2"
+jaq-std = "1.2.1"
