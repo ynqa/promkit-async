@@ -48,7 +48,6 @@ impl Prompt {
         ]));
 
         let (query_tx, query_rx) = mpsc::channel(1);
-        let (pane_tx, mut pane_rx) = mpsc::channel(1);
 
         let evaluating_panes = shared_panes.clone();
         let evaluating_terminal = shared_terminal.clone();
@@ -86,14 +85,6 @@ impl Prompt {
                         let mut panes = shared_panes.lock().await;
                         let mut terminal = shared_terminal.lock().await;
                         panes[0] = pane;
-                        terminal.draw(&*panes)?;
-                    }
-                },
-                Some(pane) = pane_rx.recv() => {
-                    {
-                        let mut panes = shared_panes.lock().await;
-                        let mut terminal = shared_terminal.lock().await;
-                        panes[1] = pane;
                         terminal.draw(&*panes)?;
                     }
                 },
