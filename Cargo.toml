@@ -19,7 +19,7 @@ async-trait = "0.1.83"
 crossterm = { version = "0.28.1", features = ["use-dev-tty", "event-stream", "libc"] }
 futures = "0.3.30"
 futures-timer = "3.0.3"
-promkit = { path = "../promkit/promkit" }
+promkit = "0.6.0"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-stream = "0.1.16"
 
