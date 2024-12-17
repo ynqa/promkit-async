@@ -1,23 +1,19 @@
-use std::{io, pin::Pin, time::Duration};
+use std::{io, sync::Arc};
 
 use crossterm::{
     self, cursor,
     event::EventStream,
-    event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::{self, disable_raw_mode, enable_raw_mode},
 };
-use futures::stream::Stream;
 use futures::StreamExt;
 use promkit::{grapheme::StyledGraphemes, pane::Pane, terminal::Terminal};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
-pub mod component;
-pub mod event;
-pub use event::Event;
-pub mod operator;
-use operator::TimeBasedOperator;
-pub mod snapshot;
+mod editor;
+pub use editor::Editor;
+mod evaluate;
+pub use evaluate::Evaluator;
 
 pub struct Prompt {}
 
@@ -28,81 +24,73 @@ impl Drop for Prompt {
     }
 }
 
+pub enum Action {
+    None,
+    MoveCursor,
+    ChangeText,
+    Quit,
+}
+
 impl Prompt {
-    pub async fn run(
-        &mut self,
-        senders: Vec<mpsc::Sender<Vec<Event>>>,
-        receivers: Vec<mpsc::Receiver<Pane>>,
-        delay: Duration,
-    ) -> anyhow::Result<()> {
+    pub async fn run<E>(&mut self, evaluator: E) -> anyhow::Result<()>
+    where
+        E: Evaluator + Send + 'static,
+    {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
-
-        let mut operator = TimeBasedOperator {};
-        let (event_sender, event_receiver) = mpsc::channel(1);
-        let (event_group_sender, mut event_group_receiver) = mpsc::channel(1);
-
-        let operator_handle = tokio::spawn(async move {
-            operator
-                .run(delay, event_receiver, event_group_sender)
-                .await
-        });
-
-        let mut panes: Vec<Pane> = (0..receivers.len())
-            .map(|_| Pane::new(vec![StyledGraphemes::from(" ")], 0))
-            .collect();
-
-        let pane_stream = futures::stream::select_all(
-            receivers
-                .into_iter()
-                .enumerate()
-                .map(|(index, rx)| {
-                    Box::pin(
-                        futures::stream::unfold(rx, move |mut rx| async move {
-                            rx.recv().await.map(|pane| (pane, rx))
-                        })
-                        .map(move |pane| (pane, index)),
-                    ) as Pin<Box<dyn Stream<Item = (Pane, usize)> + Send>>
-                })
-                .collect::<Vec<_>>(),
-        );
-        tokio::pin!(pane_stream);
 
         let mut terminal = Terminal {
             position: cursor::position()?,
         };
+
+        let size = terminal::size()?;
+        let mut editor = Editor::default();
+        let shared_panes: Arc<Mutex<[Pane; 2]>> = Arc::new(Mutex::new([
+            editor.create_pane(size.0, size.1),
+            Pane::new(vec![StyledGraphemes::from(" ")], 0),
+        ]));
+
+        let (query_tx, query_rx) = mpsc::channel(1);
+        let (pane_tx, mut pane_rx) = mpsc::channel(1);
+
+        let evaluator = Arc::new(Mutex::new(evaluator));
+        let evaluator_clone = evaluator.clone();
+
+        let evaluating = tokio::spawn(async move {
+            let mut evaluator = evaluator_clone.lock().await;
+            evaluator.run(size, query_rx, pane_tx).await
+        });
+
         let mut stream = EventStream::new();
-        let mut result = Ok(());
 
         'main: loop {
             tokio::select! {
                 Some(Ok(event)) = stream.next() => {
-                    if event == crossterm::event::Event::Key(KeyEvent {
-                        code: KeyCode::Esc,
-                        modifiers: KeyModifiers::NONE,
-                        kind: KeyEventKind::Press,
-                        state: KeyEventState::NONE,
-                    }) {
-                        break 'main;
-                    }
-                    if let Err(e) = event_sender.send(event).await {
-                        result = Err(anyhow::anyhow!("Failed to send event: {}", e));
-                        break 'main;
-                    }
-                },
-                Some(event_groups) = event_group_receiver.recv() => {
-                    for sender in &senders {
-                        if let Err(e) = sender.send(event_groups.clone()).await {
-                            result = Err(anyhow::anyhow!("Failed to send event groups: {}", e));
+                    match editor.evaluate(&event)? {
+                        Action::None => {
+                            continue 'main;
+                        },
+                        Action::Quit => {
                             break 'main;
                         }
+                        Action::ChangeText => {
+                            query_tx.send(editor.text()).await?;
+                        }
+                        Action::MoveCursor => (),
+                    }
+                    let size = terminal::size()?;
+                    let pane = editor.create_pane(size.0, size.1);
+                    {
+                        let mut panes = shared_panes.lock().await;
+                        panes[0] = pane;
+                        terminal.draw(&*panes)?;
                     }
                 },
-                Some((pane, index)) = pane_stream.next() => {
-                    panes[index] = pane;
-                    if let Err(e) = terminal.draw(&panes) {
-                        result = Err(anyhow::anyhow!("Failed to draw panes: {}", e));
-                        break 'main;
+                Some(pane) = pane_rx.recv() => {
+                    {
+                        let mut panes = shared_panes.lock().await;
+                        panes[1] = pane;
+                        terminal.draw(&*panes)?;
                     }
                 },
                 else => {
@@ -111,8 +99,8 @@ impl Prompt {
             }
         }
 
-        operator_handle.abort();
+        evaluating.abort();
 
-        result
+        Ok(())
     }
 }
