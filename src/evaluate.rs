@@ -29,7 +29,8 @@ pub trait Evaluator: Clone + Send + Sync + 'static {
         mut query_rx: mpsc::Receiver<String>,
         tx: mpsc::Sender<Pane>,
     ) {
-        let mut current_task: Option<JoinHandle<Result<(), mpsc::error::SendError<Pane>>>> = None;
+        let shared_self = Arc::new(Mutex::new(self.clone()));
+        let mut current_task: Option<JoinHandle<()>> = None;
         let loading_state = Arc::new(Mutex::new(LoadingState {
             frame_index: 0,
             state: State::Idle,
@@ -72,25 +73,26 @@ pub trait Evaluator: Clone + Send + Sync + 'static {
                         task.abort();
                     }
 
-                    let query = query.clone();
-                    let tx_clone = tx.clone();
+                    let this = shared_self.clone();
+                    let tx = tx.clone();
                     let loading_state = loading_state.clone();
 
-                    let process_task = {
-                        let mut this = self.clone();
-                        tokio::spawn(async move {
-                            {
-                                let mut state = loading_state.lock().await;
-                                state.state = State::ProcessQuery;
-                            }
-                            let result = this.process_query(area, query).await;
-                            {
-                                let mut state = loading_state.lock().await;
-                                state.state = State::Idle;
-                            }
-                            tx_clone.send(result).await
-                        })
-                    };
+                    let process_task = tokio::spawn(async move {
+                        {
+                            let mut state = loading_state.lock().await;
+                            state.state = State::ProcessQuery;
+                        }
+
+                        let result = {
+                            let mut evaluator = this.lock().await;
+                            evaluator.process_query(area, query).await
+                        };
+
+                        let _ = tx.send(result).await;
+
+                        let mut state = loading_state.lock().await;
+                        state.state = State::Idle;
+                    });
 
                     current_task = Some(process_task);
                 }
