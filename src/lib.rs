@@ -36,9 +36,9 @@ impl Prompt {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
 
-        let mut terminal = Terminal {
+        let shared_terminal = Arc::new(Mutex::new(Terminal {
             position: cursor::position()?,
-        };
+        }));
 
         let size = terminal::size()?;
         let mut editor = Editor::default();
@@ -50,13 +50,18 @@ impl Prompt {
         let (query_tx, query_rx) = mpsc::channel(1);
         let (pane_tx, mut pane_rx) = mpsc::channel(1);
 
-        // let evaluator = Arc::new(Mutex::new(evaluator));
-        // let evaluator_clone = evaluator.clone();
-
-        let evaluating =
-            tokio::spawn(
-                async move { evaluate::evaluate(evaluator, size, query_rx, pane_tx).await },
-            );
+        let evaluating_panes = shared_panes.clone();
+        let evaluating_terminal = shared_terminal.clone();
+        let evaluating = tokio::spawn(async move {
+            evaluate::evaluate(
+                evaluator,
+                size,
+                query_rx,
+                evaluating_terminal,
+                evaluating_panes,
+            )
+            .await
+        });
 
         let mut stream = EventStream::new();
 
@@ -79,6 +84,7 @@ impl Prompt {
                     let pane = editor.create_pane(size.0, size.1);
                     {
                         let mut panes = shared_panes.lock().await;
+                        let mut terminal = shared_terminal.lock().await;
                         panes[0] = pane;
                         terminal.draw(&*panes)?;
                     }
@@ -86,6 +92,7 @@ impl Prompt {
                 Some(pane) = pane_rx.recv() => {
                     {
                         let mut panes = shared_panes.lock().await;
+                        let mut terminal = shared_terminal.lock().await;
                         panes[1] = pane;
                         terminal.draw(&*panes)?;
                     }

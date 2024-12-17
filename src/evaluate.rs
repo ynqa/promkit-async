@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use promkit::pane::Pane;
+use promkit::terminal::Terminal;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -9,7 +10,6 @@ use tokio::{sync::mpsc, task::JoinHandle};
 enum State {
     Idle,
     ProcessQuery,
-    ProcessEvents,
 }
 
 struct LoadingState {
@@ -28,7 +28,8 @@ pub async fn evaluate(
     evaluator: impl Evaluator,
     area: (u16, u16),
     mut query_rx: mpsc::Receiver<String>,
-    tx: mpsc::Sender<Pane>,
+    shared_terminal: Arc<Mutex<Terminal>>,
+    shared_panes: Arc<Mutex<[Pane; 2]>>,
 ) {
     let shared_self = Arc::new(Mutex::new(evaluator));
     let mut current_task: Option<JoinHandle<()>> = None;
@@ -37,9 +38,11 @@ pub async fn evaluate(
         state: State::Idle,
     }));
 
+    let loading_panes = shared_panes.clone();
+    let loading_terminal = shared_terminal.clone();
+
     let loading_task = {
         let loading_state = loading_state.clone();
-        let tx = tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(500));
             loop {
@@ -60,8 +63,12 @@ pub async fn evaluate(
                     )],
                     0,
                 );
-                if tx.send(loading_pane).await.is_err() {
-                    break;
+                {
+                    let mut panes = loading_panes.lock().await;
+                    let mut terminal = loading_terminal.lock().await;
+                    panes[1] = loading_pane;
+                    // TODO: error handling
+                    terminal.draw(&*panes);
                 }
             }
         })
@@ -75,8 +82,9 @@ pub async fn evaluate(
                 }
 
                 let this = shared_self.clone();
-                let tx = tx.clone();
                 let loading_state = loading_state.clone();
+                let evaluating_panes = shared_panes.clone();
+                let evaluating_terminal = shared_terminal.clone();
 
                 let process_task = tokio::spawn(async move {
                     {
@@ -89,10 +97,15 @@ pub async fn evaluate(
                         evaluator.process_query(area, query).await
                     };
 
-                    let _ = tx.send(result).await;
-
-                    let mut state = loading_state.lock().await;
-                    state.state = State::Idle;
+                    {
+                        let mut panes = evaluating_panes.lock().await;
+                        let mut state = loading_state.lock().await;
+                        let mut terminal = evaluating_terminal.lock().await;
+                        panes[1] = result;
+                        state.state = State::Idle;
+                        // TODO: error handling
+                        terminal.draw(&*panes);
+                    }
                 });
 
                 current_task = Some(process_task);
