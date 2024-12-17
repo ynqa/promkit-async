@@ -32,10 +32,7 @@ pub enum Action {
 }
 
 impl Prompt {
-    pub async fn run<E>(&mut self, evaluator: E) -> anyhow::Result<()>
-    where
-        E: Evaluator + Send + 'static,
-    {
+    pub async fn run(&mut self, evaluator: impl Evaluator) -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
 
@@ -53,13 +50,13 @@ impl Prompt {
         let (query_tx, query_rx) = mpsc::channel(1);
         let (pane_tx, mut pane_rx) = mpsc::channel(1);
 
-        let evaluator = Arc::new(Mutex::new(evaluator));
-        let evaluator_clone = evaluator.clone();
+        // let evaluator = Arc::new(Mutex::new(evaluator));
+        // let evaluator_clone = evaluator.clone();
 
-        let evaluating = tokio::spawn(async move {
-            let mut evaluator = evaluator_clone.lock().await;
-            evaluator.run(size, query_rx, pane_tx).await
-        });
+        let evaluating =
+            tokio::spawn(
+                async move { evaluate::evaluate(evaluator, size, query_rx, pane_tx).await },
+            );
 
         let mut stream = EventStream::new();
 
