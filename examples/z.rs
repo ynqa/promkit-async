@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, io::Read, time::Duration};
 
 use crossterm::style::{Attribute, Attributes};
 use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
@@ -98,7 +98,13 @@ async fn main() -> anyhow::Result<()> {
     let deserializer = Deserializer::from_str(&ret).into_iter::<serde_json::Value>();
     let stream = deserializer.collect::<Result<Vec<_>, _>>();
 
-    Prompt {}.run(Json::new(stream?)?).await?;
+    Prompt {}
+        .run(
+            Json::new(stream?)?,
+            Duration::from_millis(600),
+            Duration::from_millis(300),
+        )
+        .await?;
 
     Ok(())
 }

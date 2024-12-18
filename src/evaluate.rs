@@ -30,6 +30,7 @@ pub async fn evaluate(
     mut query_rx: mpsc::Receiver<String>,
     shared_terminal: Arc<Mutex<Terminal>>,
     shared_panes: Arc<Mutex<[Pane; 2]>>,
+    spin_duration: Duration,
 ) {
     let shared_self = Arc::new(Mutex::new(evaluator));
     let mut current_task: Option<JoinHandle<()>> = None;
@@ -44,7 +45,7 @@ pub async fn evaluate(
     let loading_task = {
         let loading_state = loading_state.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            let mut interval = tokio::time::interval(spin_duration);
             loop {
                 interval.tick().await;
 

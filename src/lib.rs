@@ -33,7 +33,12 @@ pub enum Action {
 }
 
 impl Prompt {
-    pub async fn run(&mut self, evaluator: impl Evaluator) -> anyhow::Result<()> {
+    pub async fn run(
+        &mut self,
+        evaluator: impl Evaluator,
+        query_debounce_duration: Duration,
+        spin_duration: Duration,
+    ) -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
 
@@ -54,7 +59,7 @@ impl Prompt {
         tokio::spawn(async move {
             let mut last_query = None;
             loop {
-                let delay = Delay::new(Duration::from_millis(1000));
+                let delay = Delay::new(query_debounce_duration);
                 futures::pin_mut!(delay);
 
                 tokio::select! {
@@ -83,6 +88,7 @@ impl Prompt {
                 last_query_rx,
                 evaluating_terminal,
                 evaluating_panes,
+                spin_duration,
             )
             .await
         });
