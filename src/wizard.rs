@@ -44,6 +44,43 @@ impl Wizard {
         state.state == State::ProcessQuery
     }
 
+    fn spawn_loading_task(
+        loading_state: Arc<Mutex<LoadingState>>,
+        loading_panes: Arc<Mutex<[Pane; 2]>>,
+        loading_terminal: Arc<Mutex<Terminal>>,
+        spin_duration: Duration,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(spin_duration);
+            loop {
+                interval.tick().await;
+
+                let mut state = loading_state.lock().await;
+                if state.state == State::Idle {
+                    continue;
+                }
+
+                let frame_index = state.frame_index;
+                state.frame_index = (state.frame_index + 1) % LOADING_FRAMES.len();
+                drop(state);
+
+                let loading_pane = Pane::new(
+                    vec![promkit::grapheme::StyledGraphemes::from(
+                        LOADING_FRAMES[frame_index],
+                    )],
+                    0,
+                );
+                {
+                    let mut panes = loading_panes.lock().await;
+                    let mut terminal = loading_terminal.lock().await;
+                    panes[1] = loading_pane;
+                    // TODO: error handling
+                    terminal.draw(&*panes);
+                }
+            }
+        })
+    }
+
     pub async fn evaluate(
         &self,
         evaluator: impl Evaluator,
@@ -60,38 +97,12 @@ impl Wizard {
         let loading_panes = shared_panes.clone();
         let loading_terminal = shared_terminal.clone();
 
-        let loading_task = {
-            let loading_state = loading_state.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(spin_duration);
-                loop {
-                    interval.tick().await;
-
-                    let mut state = loading_state.lock().await;
-                    if state.state == State::Idle {
-                        continue;
-                    }
-
-                    let frame_index = state.frame_index;
-                    state.frame_index = (state.frame_index + 1) % LOADING_FRAMES.len();
-                    drop(state);
-
-                    let loading_pane = Pane::new(
-                        vec![promkit::grapheme::StyledGraphemes::from(
-                            LOADING_FRAMES[frame_index],
-                        )],
-                        0,
-                    );
-                    {
-                        let mut panes = loading_panes.lock().await;
-                        let mut terminal = loading_terminal.lock().await;
-                        panes[1] = loading_pane;
-                        // TODO: error handling
-                        terminal.draw(&*panes);
-                    }
-                }
-            })
-        };
+        let loading_task = Self::spawn_loading_task(
+            loading_state.clone(),
+            loading_panes,
+            loading_terminal,
+            spin_duration,
+        );
 
         loop {
             tokio::select! {
