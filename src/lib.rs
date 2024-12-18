@@ -81,12 +81,11 @@ impl Prompt {
 
         let evaluating_panes = shared_panes.clone();
         let evaluating_terminal = shared_terminal.clone();
-        let wizard = Wizard::new();
+        let wizard = Wizard::new(size);
         let evaluating = tokio::spawn(async move {
             wizard
                 .evaluate(
                     evaluator,
-                    size,
                     last_query_rx,
                     evaluating_terminal,
                     evaluating_panes,

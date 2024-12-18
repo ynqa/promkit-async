@@ -10,6 +10,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 enum State {
     Idle,
     ProcessQuery,
+    RewriteOnResize,
 }
 
 #[derive(PartialEq)]
@@ -27,15 +28,17 @@ const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "
 
 pub struct Wizard {
     loading_state: Arc<Mutex<LoadingState>>,
+    shared_area: Arc<Mutex<(u16, u16)>>,
 }
 
 impl Wizard {
-    pub fn new() -> Self {
+    pub fn new(area: (u16, u16)) -> Self {
         Self {
             loading_state: Arc::new(Mutex::new(LoadingState {
                 frame_index: 0,
                 state: State::Idle,
             })),
+            shared_area: Arc::new(Mutex::new(area)),
         }
     }
 
@@ -84,7 +87,6 @@ impl Wizard {
     pub async fn evaluate(
         &self,
         evaluator: impl Evaluator,
-        area: (u16, u16),
         mut query_rx: mpsc::Receiver<String>,
         shared_terminal: Arc<Mutex<Terminal>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
@@ -115,6 +117,7 @@ impl Wizard {
                     let loading_state = loading_state.clone();
                     let evaluating_panes = shared_panes.clone();
                     let evaluating_terminal = shared_terminal.clone();
+                    let area = self.shared_area.clone();
 
                     let process_task = tokio::spawn(async move {
                         {
@@ -124,7 +127,8 @@ impl Wizard {
 
                         let result = {
                             let mut evaluator = this.lock().await;
-                            evaluator.process_query(area, query).await
+                            let area = area.lock().await;
+                            evaluator.process_query(*area, query).await
                         };
 
                         {
