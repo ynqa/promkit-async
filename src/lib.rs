@@ -1,4 +1,4 @@
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, time::Duration};
 
 use crossterm::{
     self, cursor,
@@ -7,6 +7,7 @@ use crossterm::{
     terminal::{self, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
+use futures_timer::Delay;
 use promkit::{grapheme::StyledGraphemes, pane::Pane, terminal::Terminal};
 use tokio::sync::{mpsc, Mutex};
 
@@ -47,7 +48,31 @@ impl Prompt {
             Pane::new(vec![StyledGraphemes::from(" ")], 0),
         ]));
 
-        let (query_tx, query_rx) = mpsc::channel(1);
+        let (last_query_tx, last_query_rx) = mpsc::channel(1);
+        let (debounce_tx, mut debounce_rx) = mpsc::channel(1);
+
+        tokio::spawn(async move {
+            let mut last_query = None;
+            loop {
+                let delay = Delay::new(Duration::from_millis(1000));
+                futures::pin_mut!(delay);
+
+                tokio::select! {
+                    maybe_query = debounce_rx.recv() => {
+                        if let Some(query) = maybe_query {
+                            last_query = Some(query);
+                        } else {
+                            break;
+                        }
+                    },
+                    _ = delay => {
+                        if let Some(text) = last_query.take() {
+                            let _ = last_query_tx.send(text).await;
+                        }
+                    },
+                }
+            }
+        });
 
         let evaluating_panes = shared_panes.clone();
         let evaluating_terminal = shared_terminal.clone();
@@ -55,7 +80,7 @@ impl Prompt {
             evaluate::evaluate(
                 evaluator,
                 size,
-                query_rx,
+                last_query_rx,
                 evaluating_terminal,
                 evaluating_panes,
             )
@@ -75,7 +100,7 @@ impl Prompt {
                             break 'main;
                         }
                         Action::ChangeText => {
-                            query_tx.send(editor.text()).await?;
+                            debounce_tx.send(editor.text()).await?;
                         }
                         Action::MoveCursor => (),
                     }
