@@ -84,6 +84,39 @@ impl Wizard {
         })
     }
 
+    fn spawn_process_task(
+        shared_area: Arc<Mutex<(u16, u16)>>,
+        query: String,
+        shared_evaluator: Arc<Mutex<impl Evaluator>>,
+        shared_state: Arc<Mutex<LoadingState>>,
+        shared_panes: Arc<Mutex<[Pane; 2]>>,
+        shared_terminal: Arc<Mutex<Terminal>>,
+    ) -> JoinHandle<()> {
+        let area = shared_area.clone();
+        tokio::spawn(async move {
+            {
+                let mut state = shared_state.lock().await;
+                state.state = State::ProcessQuery;
+            }
+
+            let result = {
+                let mut evaluator = shared_evaluator.lock().await;
+                let area = area.lock().await;
+                evaluator.process_query(*area, query).await
+            };
+
+            {
+                let mut panes = shared_panes.lock().await;
+                let mut state = shared_state.lock().await;
+                let mut terminal = shared_terminal.lock().await;
+                panes[1] = result;
+                state.state = State::Idle;
+                // TODO: error handling
+                terminal.draw(&*panes);
+            }
+        })
+    }
+
     pub async fn evaluate(
         &self,
         evaluator: impl Evaluator,
@@ -92,7 +125,7 @@ impl Wizard {
         shared_panes: Arc<Mutex<[Pane; 2]>>,
         spin_duration: Duration,
     ) {
-        let shared_self = Arc::new(Mutex::new(evaluator));
+        let shared_evaluator = Arc::new(Mutex::new(evaluator));
         let mut current_task: Option<JoinHandle<()>> = None;
         let loading_state = self.loading_state.clone();
 
@@ -113,34 +146,20 @@ impl Wizard {
                         task.abort();
                     }
 
-                    let this = shared_self.clone();
-                    let loading_state = loading_state.clone();
+                    let evaluating_evaluator = shared_evaluator.clone();
+                    let evaluating_state = loading_state.clone();
                     let evaluating_panes = shared_panes.clone();
                     let evaluating_terminal = shared_terminal.clone();
                     let area = self.shared_area.clone();
 
-                    let process_task = tokio::spawn(async move {
-                        {
-                            let mut state = loading_state.lock().await;
-                            state.state = State::ProcessQuery;
-                        }
-
-                        let result = {
-                            let mut evaluator = this.lock().await;
-                            let area = area.lock().await;
-                            evaluator.process_query(*area, query).await
-                        };
-
-                        {
-                            let mut panes = evaluating_panes.lock().await;
-                            let mut state = loading_state.lock().await;
-                            let mut terminal = evaluating_terminal.lock().await;
-                            panes[1] = result;
-                            state.state = State::Idle;
-                            // TODO: error handling
-                            terminal.draw(&*panes);
-                        }
-                    });
+                    let process_task = Self::spawn_process_task(
+                        area,
+                        query,
+                        evaluating_evaluator,
+                        evaluating_state,
+                        evaluating_panes,
+                        evaluating_terminal,
+                    );
 
                     current_task = Some(process_task);
                 }
