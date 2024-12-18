@@ -13,8 +13,8 @@ use tokio::sync::{mpsc, Mutex};
 
 mod editor;
 pub use editor::Editor;
-mod evaluate;
-pub use evaluate::Evaluator;
+mod wizard;
+pub use wizard::{Evaluator, Wizard};
 
 pub struct Prompt {}
 
@@ -81,16 +81,18 @@ impl Prompt {
 
         let evaluating_panes = shared_panes.clone();
         let evaluating_terminal = shared_terminal.clone();
+        let wizard = Wizard::new();
         let evaluating = tokio::spawn(async move {
-            evaluate::evaluate(
-                evaluator,
-                size,
-                last_query_rx,
-                evaluating_terminal,
-                evaluating_panes,
-                spin_duration,
-            )
-            .await
+            wizard
+                .evaluate(
+                    evaluator,
+                    size,
+                    last_query_rx,
+                    evaluating_terminal,
+                    evaluating_panes,
+                    spin_duration,
+                )
+                .await
         });
 
         let mut stream = EventStream::new();
