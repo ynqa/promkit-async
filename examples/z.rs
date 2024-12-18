@@ -93,7 +93,8 @@ fn run_jaq(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut ret = String::new();
-    File::open("/Users/eufy/workspace/github.com/ynqa/promkit-async/examples/test.json")?
+    File::open("/Users/eufy/workspace/github.com/ynqa/promkit-async/examples/small.json")?
+    // File::open("/Users/eufy/workspace/github.com/ynqa/promkit-async/examples/large.json")?
         .read_to_string(&mut ret)?;
     let deserializer = Deserializer::from_str(&ret).into_iter::<serde_json::Value>();
     let stream = deserializer.collect::<Result<Vec<_>, _>>();
