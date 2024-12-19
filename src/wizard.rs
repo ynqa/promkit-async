@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 enum State {
     Idle,
     ProcessQuery,
-    Rewrite,
 }
 
 #[async_trait]
