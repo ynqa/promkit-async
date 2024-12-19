@@ -11,7 +11,7 @@ use promkit::{
     style::StyleBuilder,
     PaneFactory,
 };
-use promkit_async::{Evaluator, Prompt};
+use promkit_async::{Processor, Prompt};
 
 #[derive(Clone)]
 pub struct Json {
@@ -48,7 +48,7 @@ impl Json {
 }
 
 #[async_trait::async_trait]
-impl Evaluator for Json {
+impl Processor for Json {
     async fn process_query(&mut self, area: (u16, u16), input: String) -> Pane {
         let new = run_jaq(&input, &self.json).ok().unwrap_or_default();
         self.state.stream = JsonStream::new(new.iter());

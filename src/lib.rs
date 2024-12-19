@@ -14,8 +14,7 @@ use tokio::sync::{mpsc, Mutex};
 mod editor;
 pub use editor::Editor;
 mod wizard;
-pub use wizard::Evaluator;
-use wizard::{LoadingManager, QueryEvaluator, SharedState};
+pub use wizard::{Context, Processor, Spinner, Wizard};
 
 pub struct Prompt {}
 
@@ -65,19 +64,19 @@ fn spawn_debouncer<T: Send + 'static>(
 impl Prompt {
     pub async fn run(
         &mut self,
-        evaluator: impl Evaluator,
+        processor: impl Processor,
         query_debounce_duration: Duration,
         spin_duration: Duration,
     ) -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
 
+        let size = terminal::size()?;
+        let mut editor = Editor::default();
+
         let shared_terminal = Arc::new(Mutex::new(Terminal {
             position: cursor::position()?,
         }));
-
-        let size = terminal::size()?;
-        let mut editor = Editor::default();
         let shared_panes: Arc<Mutex<[Pane; 2]>> = Arc::new(Mutex::new([
             editor.create_pane(size.0, size.1),
             Pane::new(vec![StyledGraphemes::from(" ")], 0),
@@ -93,19 +92,18 @@ impl Prompt {
         let resize_debouncer =
             spawn_debouncer(debounce_resize_rx, last_resize_tx, query_debounce_duration);
 
-        let shared_state = Arc::new(Mutex::new(SharedState::new(size)));
+        let ctx = Arc::new(Mutex::new(Context::new(size)));
 
-        let loading_panes = shared_panes.clone();
-        let loading_terminal = shared_terminal.clone();
-        let loading_manager = LoadingManager::new(shared_state.clone());
-        let loading_task = tokio::spawn(async move {
-            loading_manager
-                .spawn_loading_task(loading_panes, loading_terminal, spin_duration)
+        let spinner = Spinner::new(ctx.clone());
+        let (spinner_panes, spinner_terminal) = (shared_panes.clone(), shared_terminal.clone());
+        let spinning = tokio::spawn(async move {
+            spinner
+                .spawn_loading_task(spinner_panes, spinner_terminal, spin_duration)
                 .await
         });
 
-        let query_evaluator = QueryEvaluator::new(shared_state.clone());
-        let shared_evaluator = Arc::new(Mutex::new(evaluator));
+        let wiz = Wizard::new(ctx.clone());
+        let shared_evaluator = Arc::new(Mutex::new(processor));
 
         let mut stream = EventStream::new();
 
@@ -138,7 +136,7 @@ impl Prompt {
                     }
                 },
                 Some(query) = last_query_rx.recv() => {
-                    query_evaluator.evaluate(shared_evaluator.clone(), query, shared_terminal.clone(), shared_panes.clone()).await;
+                    wiz.evaluate(shared_evaluator.clone(), query, shared_terminal.clone(), shared_panes.clone()).await;
                 }
                 Some(area) = last_resize_rx.recv() => {
                     let pane = editor.create_pane(size.0, size.1);
@@ -156,7 +154,7 @@ impl Prompt {
             }
         }
 
-        loading_task.abort();
+        spinning.abort();
         query_debouncer.abort();
         resize_debouncer.abort();
 

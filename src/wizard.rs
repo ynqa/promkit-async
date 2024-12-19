@@ -7,41 +7,41 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 #[derive(PartialEq)]
-enum LoadingState {
+enum State {
     Idle,
     ProcessQuery,
-    RewriteOnResize,
+    Rewrite,
 }
 
 #[async_trait]
-pub trait Evaluator: Send + Sync + 'static {
+pub trait Processor: Send + Sync + 'static {
     async fn process_query(&mut self, area: (u16, u16), query: String) -> Pane;
 }
 
 const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-pub struct SharedState {
-    loading_state: LoadingState,
+pub struct Context {
+    state: State,
     area: (u16, u16),
     current_task: Option<JoinHandle<()>>,
 }
 
-impl SharedState {
+impl Context {
     pub fn new(area: (u16, u16)) -> Self {
         Self {
-            loading_state: LoadingState::Idle,
+            state: State::Idle,
             area,
             current_task: None,
         }
     }
 }
 
-pub struct LoadingManager {
-    shared: Arc<Mutex<SharedState>>,
+pub struct Spinner {
+    shared: Arc<Mutex<Context>>,
 }
 
-impl LoadingManager {
-    pub fn new(shared: Arc<Mutex<SharedState>>) -> Self {
+impl Spinner {
+    pub fn new(shared: Arc<Mutex<Context>>) -> Self {
         Self { shared }
     }
 
@@ -60,7 +60,7 @@ impl LoadingManager {
 
                 {
                     let shared_state = shared.lock().await;
-                    if shared_state.loading_state == LoadingState::Idle {
+                    if shared_state.state == State::Idle {
                         continue;
                     }
                 }
@@ -85,19 +85,19 @@ impl LoadingManager {
     }
 }
 
-pub struct QueryEvaluator {
-    shared: Arc<Mutex<SharedState>>,
+pub struct Wizard {
+    shared: Arc<Mutex<Context>>,
 }
 
-impl QueryEvaluator {
-    pub fn new(shared: Arc<Mutex<SharedState>>) -> Self {
+impl Wizard {
+    pub fn new(shared: Arc<Mutex<Context>>) -> Self {
         Self { shared }
     }
 
     fn spawn_process_task(
         &self,
         query: String,
-        shared_evaluator: Arc<Mutex<impl Evaluator>>,
+        shared_processor: Arc<Mutex<impl Processor>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
         shared_terminal: Arc<Mutex<Terminal>>,
     ) -> JoinHandle<()> {
@@ -105,7 +105,7 @@ impl QueryEvaluator {
         tokio::spawn(async move {
             {
                 let mut shared_state = shared.lock().await;
-                shared_state.loading_state = LoadingState::ProcessQuery;
+                shared_state.state = State::ProcessQuery;
             }
 
             let result = {
@@ -113,8 +113,8 @@ impl QueryEvaluator {
                 let area = shared_state.area;
                 drop(shared_state);
 
-                let mut evaluator = shared_evaluator.lock().await;
-                evaluator.process_query(area, query).await
+                let mut processor = shared_processor.lock().await;
+                processor.process_query(area, query).await
             };
 
             {
@@ -122,7 +122,7 @@ impl QueryEvaluator {
                 let mut shared_state = shared.lock().await;
                 let mut terminal = shared_terminal.lock().await;
                 panes[1] = result;
-                shared_state.loading_state = LoadingState::Idle;
+                shared_state.state = State::Idle;
                 // TODO: error handling
                 terminal.draw(&*panes);
             }
@@ -131,7 +131,7 @@ impl QueryEvaluator {
 
     pub async fn evaluate(
         &self,
-        shared_evaluator: Arc<Mutex<impl Evaluator>>,
+        shared_processor: Arc<Mutex<impl Processor>>,
         query: String,
         shared_terminal: Arc<Mutex<Terminal>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
@@ -144,7 +144,7 @@ impl QueryEvaluator {
         }
 
         let process_task =
-            self.spawn_process_task(query, shared_evaluator, shared_panes, shared_terminal);
+            self.spawn_process_task(query, shared_processor, shared_panes, shared_terminal);
 
         {
             let mut shared_state = self.shared.lock().await;
