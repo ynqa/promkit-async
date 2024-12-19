@@ -48,17 +48,18 @@ impl Wizard {
     }
 
     fn spawn_loading_task(
-        loading_state: Arc<Mutex<LoadingState>>,
+        &self,
         loading_panes: Arc<Mutex<[Pane; 2]>>,
         loading_terminal: Arc<Mutex<Terminal>>,
         spin_duration: Duration,
     ) -> JoinHandle<()> {
+        let state = self.loading_state.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(spin_duration);
             loop {
                 interval.tick().await;
 
-                let mut state = loading_state.lock().await;
+                let mut state = state.lock().await;
                 if state.state == State::Idle {
                     continue;
                 }
@@ -85,17 +86,18 @@ impl Wizard {
     }
 
     fn spawn_process_task(
+        &self,
         shared_area: Arc<Mutex<(u16, u16)>>,
         query: String,
         shared_evaluator: Arc<Mutex<impl Evaluator>>,
-        shared_state: Arc<Mutex<LoadingState>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
         shared_terminal: Arc<Mutex<Terminal>>,
     ) -> JoinHandle<()> {
         let area = shared_area.clone();
+        let state = self.loading_state.clone();
         tokio::spawn(async move {
             {
-                let mut state = shared_state.lock().await;
+                let mut state = state.lock().await;
                 state.state = State::ProcessQuery;
             }
 
@@ -107,7 +109,7 @@ impl Wizard {
 
             {
                 let mut panes = shared_panes.lock().await;
-                let mut state = shared_state.lock().await;
+                let mut state = state.lock().await;
                 let mut terminal = shared_terminal.lock().await;
                 panes[1] = result;
                 state.state = State::Idle;
@@ -127,17 +129,11 @@ impl Wizard {
     ) {
         let shared_evaluator = Arc::new(Mutex::new(evaluator));
         let mut current_task: Option<JoinHandle<()>> = None;
-        let loading_state = self.loading_state.clone();
 
         let loading_panes = shared_panes.clone();
         let loading_terminal = shared_terminal.clone();
 
-        let loading_task = Self::spawn_loading_task(
-            loading_state.clone(),
-            loading_panes,
-            loading_terminal,
-            spin_duration,
-        );
+        let loading_task = self.spawn_loading_task(loading_panes, loading_terminal, spin_duration);
 
         loop {
             tokio::select! {
@@ -147,16 +143,14 @@ impl Wizard {
                     }
 
                     let evaluating_evaluator = shared_evaluator.clone();
-                    let evaluating_state = loading_state.clone();
                     let evaluating_panes = shared_panes.clone();
                     let evaluating_terminal = shared_terminal.clone();
                     let area = self.shared_area.clone();
 
-                    let process_task = Self::spawn_process_task(
+                    let process_task = self.spawn_process_task(
                         area,
                         query,
                         evaluating_evaluator,
-                        evaluating_state,
                         evaluating_panes,
                         evaluating_terminal,
                     );
