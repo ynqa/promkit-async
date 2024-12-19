@@ -129,6 +129,31 @@ impl Wizard {
         })
     }
 
+    pub async fn write_on_resize(
+        &self,
+        shared_processor: Arc<Mutex<impl Processor>>,
+        area: (u16, u16),
+        query: String,
+        shared_terminal: Arc<Mutex<Terminal>>,
+        shared_panes: Arc<Mutex<[Pane; 2]>>,
+    ) {
+        {
+            let mut shared_state = self.shared.lock().await;
+            shared_state.area = area;
+            if let Some(task) = shared_state.current_task.take() {
+                task.abort();
+            }
+        }
+
+        let process_task =
+            self.spawn_process_task(query, shared_processor, shared_panes, shared_terminal);
+
+        {
+            let mut shared_state = self.shared.lock().await;
+            shared_state.current_task = Some(process_task);
+        }
+    }
+
     pub async fn evaluate(
         &self,
         shared_processor: Arc<Mutex<impl Processor>>,

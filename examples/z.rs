@@ -102,8 +102,9 @@ async fn main() -> anyhow::Result<()> {
     Prompt {}
         .run(
             Json::new(stream?)?,
-            Duration::from_millis(600),
             Duration::from_millis(300),
+            Duration::from_millis(600),
+            Duration::from_millis(200),
         )
         .await?;
 

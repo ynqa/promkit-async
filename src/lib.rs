@@ -65,8 +65,9 @@ impl Prompt {
     pub async fn run(
         &mut self,
         processor: impl Processor,
-        query_debounce_duration: Duration,
         spin_duration: Duration,
+        query_debounce_duration: Duration,
+        resize_debounce_duration: Duration,
     ) -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(io::stdout(), cursor::Hide)?;
@@ -90,7 +91,7 @@ impl Prompt {
         let (last_resize_tx, mut last_resize_rx) = mpsc::channel(1);
         let (debounce_resize_tx, debounce_resize_rx) = mpsc::channel(1);
         let resize_debouncer =
-            spawn_debouncer(debounce_resize_rx, last_resize_tx, query_debounce_duration);
+            spawn_debouncer(debounce_resize_rx, last_resize_tx, resize_debounce_duration);
 
         let ctx = Arc::new(Mutex::new(Context::new(size)));
 
@@ -139,14 +140,14 @@ impl Prompt {
                     wiz.evaluate(shared_evaluator.clone(), query, shared_terminal.clone(), shared_panes.clone()).await;
                 }
                 Some(area) = last_resize_rx.recv() => {
-                    let pane = editor.create_pane(size.0, size.1);
-
+                    let pane = editor.create_pane(area.0, area.1);
                     {
                         let mut panes = shared_panes.lock().await;
                         let mut terminal = shared_terminal.lock().await;
                         panes[0] = pane;
                         terminal.draw(&*panes)?;
                     }
+                    wiz.write_on_resize(shared_evaluator.clone(), area, editor.text(), shared_terminal.clone(), shared_panes.clone()).await;
                 }
                 else => {
                     break 'main;
