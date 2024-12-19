@@ -6,17 +6,11 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-#[derive(Clone, PartialEq)]
-enum State {
+#[derive(PartialEq)]
+enum LoadingState {
     Idle,
     ProcessQuery,
     RewriteOnResize,
-}
-
-#[derive(PartialEq)]
-struct LoadingState {
-    frame_index: usize,
-    state: State,
 }
 
 #[async_trait]
@@ -35,10 +29,7 @@ pub struct SharedState {
 impl SharedState {
     pub fn new(area: (u16, u16)) -> Self {
         Self {
-            loading_state: LoadingState {
-                frame_index: 0,
-                state: State::Idle,
-            },
+            loading_state: LoadingState::Idle,
             area,
             current_task: None,
         }
@@ -61,19 +52,20 @@ impl LoadingManager {
         spin_duration: Duration,
     ) -> JoinHandle<()> {
         let shared = self.shared.clone();
+        let mut frame_index = 0;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(spin_duration);
             loop {
                 interval.tick().await;
 
-                let mut shared_state = shared.lock().await;
-                if shared_state.loading_state.state == State::Idle {
-                    continue;
+                {
+                    let shared_state = shared.lock().await;
+                    if shared_state.loading_state == LoadingState::Idle {
+                        continue;
+                    }
                 }
 
-                let frame_index = shared_state.loading_state.frame_index;
-                shared_state.loading_state.frame_index = (frame_index + 1) % LOADING_FRAMES.len();
-                drop(shared_state);
+                frame_index = (frame_index + 1) % LOADING_FRAMES.len();
 
                 let loading_pane = Pane::new(
                     vec![promkit::grapheme::StyledGraphemes::from(
@@ -113,7 +105,7 @@ impl QueryEvaluator {
         tokio::spawn(async move {
             {
                 let mut shared_state = shared.lock().await;
-                shared_state.loading_state.state = State::ProcessQuery;
+                shared_state.loading_state = LoadingState::ProcessQuery;
             }
 
             let result = {
@@ -130,7 +122,7 @@ impl QueryEvaluator {
                 let mut shared_state = shared.lock().await;
                 let mut terminal = shared_terminal.lock().await;
                 panes[1] = result;
-                shared_state.loading_state.state = State::Idle;
+                shared_state.loading_state = LoadingState::Idle;
                 // TODO: error handling
                 terminal.draw(&*panes);
             }
