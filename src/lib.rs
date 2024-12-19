@@ -14,7 +14,8 @@ use tokio::sync::{mpsc, Mutex};
 mod editor;
 pub use editor::Editor;
 mod wizard;
-pub use wizard::{Evaluator, Wizard};
+pub use wizard::Evaluator;
+use wizard::{LoadingManager, QueryEvaluator, SharedState};
 
 pub struct Prompt {}
 
@@ -82,7 +83,7 @@ impl Prompt {
             Pane::new(vec![StyledGraphemes::from(" ")], 0),
         ]));
 
-        let (last_query_tx, last_query_rx) = mpsc::channel(1);
+        let (last_query_tx, mut last_query_rx) = mpsc::channel(1);
         let (debounce_query_tx, debounce_query_rx) = mpsc::channel(1);
         let query_debouncer =
             spawn_debouncer(debounce_query_rx, last_query_tx, query_debounce_duration);
@@ -92,20 +93,19 @@ impl Prompt {
         let resize_debouncer =
             spawn_debouncer(debounce_resize_rx, last_resize_tx, query_debounce_duration);
 
-        let evaluating_panes = shared_panes.clone();
-        let evaluating_terminal = shared_terminal.clone();
-        let wizard = Wizard::new(size);
-        let evaluating = tokio::spawn(async move {
-            wizard
-                .evaluate(
-                    evaluator,
-                    last_query_rx,
-                    evaluating_terminal,
-                    evaluating_panes,
-                    spin_duration,
-                )
+        let shared_state = Arc::new(Mutex::new(SharedState::new(size)));
+
+        let loading_panes = shared_panes.clone();
+        let loading_terminal = shared_terminal.clone();
+        let loading_manager = LoadingManager::new(shared_state.clone());
+        let loading_task = tokio::spawn(async move {
+            loading_manager
+                .spawn_loading_task(loading_panes, loading_terminal, spin_duration)
                 .await
         });
+
+        let query_evaluator = QueryEvaluator::new(shared_state.clone());
+        let shared_evaluator = Arc::new(Mutex::new(evaluator));
 
         let mut stream = EventStream::new();
 
@@ -137,6 +137,9 @@ impl Prompt {
                         }
                     }
                 },
+                Some(query) = last_query_rx.recv() => {
+                    query_evaluator.evaluate(shared_evaluator.clone(), query, shared_terminal.clone(), shared_panes.clone()).await;
+                }
                 Some(area) = last_resize_rx.recv() => {
                     let pane = editor.create_pane(size.0, size.1);
 
@@ -153,7 +156,7 @@ impl Prompt {
             }
         }
 
-        evaluating.abort();
+        loading_task.abort();
         query_debouncer.abort();
         resize_debouncer.abort();
 

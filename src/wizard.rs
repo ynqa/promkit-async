@@ -4,7 +4,7 @@ use promkit::terminal::Terminal;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::task::JoinHandle;
 
 #[derive(Clone, PartialEq)]
 enum State {
@@ -26,47 +26,54 @@ pub trait Evaluator: Send + Sync + 'static {
 
 const LOADING_FRAMES: [&'static str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-pub struct Wizard {
-    loading_state: Arc<Mutex<LoadingState>>,
-    shared_area: Arc<Mutex<(u16, u16)>>,
+pub struct SharedState {
+    loading_state: LoadingState,
+    area: (u16, u16),
+    current_task: Option<JoinHandle<()>>,
 }
 
-impl Wizard {
+impl SharedState {
     pub fn new(area: (u16, u16)) -> Self {
         Self {
-            loading_state: Arc::new(Mutex::new(LoadingState {
+            loading_state: LoadingState {
                 frame_index: 0,
                 state: State::Idle,
-            })),
-            shared_area: Arc::new(Mutex::new(area)),
+            },
+            area,
+            current_task: None,
         }
     }
+}
 
-    pub async fn is_process_query(&self) -> bool {
-        let state = self.loading_state.lock().await;
-        state.state == State::ProcessQuery
+pub struct LoadingManager {
+    shared: Arc<Mutex<SharedState>>,
+}
+
+impl LoadingManager {
+    pub fn new(shared: Arc<Mutex<SharedState>>) -> Self {
+        Self { shared }
     }
 
-    fn spawn_loading_task(
+    pub fn spawn_loading_task(
         &self,
         loading_panes: Arc<Mutex<[Pane; 2]>>,
         loading_terminal: Arc<Mutex<Terminal>>,
         spin_duration: Duration,
     ) -> JoinHandle<()> {
-        let state = self.loading_state.clone();
+        let shared = self.shared.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(spin_duration);
             loop {
                 interval.tick().await;
 
-                let mut state = state.lock().await;
-                if state.state == State::Idle {
+                let mut shared_state = shared.lock().await;
+                if shared_state.loading_state.state == State::Idle {
                     continue;
                 }
 
-                let frame_index = state.frame_index;
-                state.frame_index = (state.frame_index + 1) % LOADING_FRAMES.len();
-                drop(state);
+                let frame_index = shared_state.loading_state.frame_index;
+                shared_state.loading_state.frame_index = (frame_index + 1) % LOADING_FRAMES.len();
+                drop(shared_state);
 
                 let loading_pane = Pane::new(
                     vec![promkit::grapheme::StyledGraphemes::from(
@@ -84,35 +91,46 @@ impl Wizard {
             }
         })
     }
+}
+
+pub struct QueryEvaluator {
+    shared: Arc<Mutex<SharedState>>,
+}
+
+impl QueryEvaluator {
+    pub fn new(shared: Arc<Mutex<SharedState>>) -> Self {
+        Self { shared }
+    }
 
     fn spawn_process_task(
         &self,
-        shared_area: Arc<Mutex<(u16, u16)>>,
         query: String,
         shared_evaluator: Arc<Mutex<impl Evaluator>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
         shared_terminal: Arc<Mutex<Terminal>>,
     ) -> JoinHandle<()> {
-        let area = shared_area.clone();
-        let state = self.loading_state.clone();
+        let shared = self.shared.clone();
         tokio::spawn(async move {
             {
-                let mut state = state.lock().await;
-                state.state = State::ProcessQuery;
+                let mut shared_state = shared.lock().await;
+                shared_state.loading_state.state = State::ProcessQuery;
             }
 
             let result = {
+                let shared_state = shared.lock().await;
+                let area = shared_state.area;
+                drop(shared_state);
+
                 let mut evaluator = shared_evaluator.lock().await;
-                let area = area.lock().await;
-                evaluator.process_query(*area, query).await
+                evaluator.process_query(area, query).await
             };
 
             {
                 let mut panes = shared_panes.lock().await;
-                let mut state = state.lock().await;
+                let mut shared_state = shared.lock().await;
                 let mut terminal = shared_terminal.lock().await;
                 panes[1] = result;
-                state.state = State::Idle;
+                shared_state.loading_state.state = State::Idle;
                 // TODO: error handling
                 terminal.draw(&*panes);
             }
@@ -121,47 +139,24 @@ impl Wizard {
 
     pub async fn evaluate(
         &self,
-        evaluator: impl Evaluator,
-        mut query_rx: mpsc::Receiver<String>,
+        shared_evaluator: Arc<Mutex<impl Evaluator>>,
+        query: String,
         shared_terminal: Arc<Mutex<Terminal>>,
         shared_panes: Arc<Mutex<[Pane; 2]>>,
-        spin_duration: Duration,
     ) {
-        let shared_evaluator = Arc::new(Mutex::new(evaluator));
-        let mut current_task: Option<JoinHandle<()>> = None;
-
-        let loading_panes = shared_panes.clone();
-        let loading_terminal = shared_terminal.clone();
-
-        let loading_task = self.spawn_loading_task(loading_panes, loading_terminal, spin_duration);
-
-        loop {
-            tokio::select! {
-                Some(query) = query_rx.recv() => {
-                    if let Some(task) = current_task.take() {
-                        task.abort();
-                    }
-
-                    let evaluating_evaluator = shared_evaluator.clone();
-                    let evaluating_panes = shared_panes.clone();
-                    let evaluating_terminal = shared_terminal.clone();
-                    let area = self.shared_area.clone();
-
-                    let process_task = self.spawn_process_task(
-                        area,
-                        query,
-                        evaluating_evaluator,
-                        evaluating_panes,
-                        evaluating_terminal,
-                    );
-
-                    current_task = Some(process_task);
-                }
-                else => {
-                    loading_task.abort();
-                    break;
-                }
+        {
+            let mut shared_state = self.shared.lock().await;
+            if let Some(task) = shared_state.current_task.take() {
+                task.abort();
             }
+        }
+
+        let process_task =
+            self.spawn_process_task(query, shared_evaluator, shared_panes, shared_terminal);
+
+        {
+            let mut shared_state = self.shared.lock().await;
+            shared_state.current_task = Some(process_task);
         }
     }
 }
