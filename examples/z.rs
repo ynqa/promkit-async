@@ -11,7 +11,7 @@ use promkit::{
     style::StyleBuilder,
     PaneFactory,
 };
-use promkit_async::{Processor, Prompt};
+use promkit_async::Processor;
 
 #[derive(Clone)]
 pub struct Json {
@@ -99,14 +99,13 @@ async fn main() -> anyhow::Result<()> {
     let deserializer = Deserializer::from_str(&ret).into_iter::<serde_json::Value>();
     let stream = deserializer.collect::<Result<Vec<_>, _>>();
 
-    Prompt {}
-        .run(
-            Json::new(stream?)?,
-            Duration::from_millis(300),
-            Duration::from_millis(600),
-            Duration::from_millis(200),
-        )
-        .await?;
+    promkit_async::run(
+        Json::new(stream?)?,
+        Duration::from_millis(300),
+        Duration::from_millis(600),
+        Duration::from_millis(200),
+    )
+    .await?;
 
     Ok(())
 }
